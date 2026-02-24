@@ -354,13 +354,32 @@ def assign():
 
 @app.route("/assign/save", methods=["POST"])
 def save_assignment():
+    # Log brut de tout ce qui arrive — aide au debug
+    logger.info(f"save_assignment form data: { {k: v for k, v in request.form.items()} }")
+
     rfid_id = request.form.get("rfid_id", "").strip()
-    target_type = request.form.get("target_type")  # "audio" ou "playlist"
-    target_id = request.form.get("target_id", type=int)
+    # Le select soumet "audio:ID" ou "playlist:ID"
+    target_raw = request.form.get("target", "").strip()
 
     if not rfid_id:
+        logger.warning("save_assignment: rfid_id manquant")
         flash("ID RFID manquant.", "error")
         return redirect(url_for("assign"))
+
+    if not target_raw or ":" not in target_raw:
+        logger.warning(f"save_assignment: valeur target invalide '{target_raw}'")
+        flash("Veuillez sélectionner un audio ou une playlist.", "error")
+        return redirect(url_for("assign"))
+
+    target_type, _, target_id_str = target_raw.partition(":")
+    try:
+        target_id = int(target_id_str)
+    except ValueError:
+        logger.warning(f"save_assignment: target_id non entier '{target_id_str}'")
+        flash("Sélection invalide.", "error")
+        return redirect(url_for("assign"))
+
+    logger.info(f"save_assignment: rfid={rfid_id} type={target_type} id={target_id}")
 
     tag = Tag.query.filter_by(rfid_id=rfid_id).first() or Tag(rfid_id=rfid_id)
 
@@ -371,13 +390,14 @@ def save_assignment():
         tag.playlist_id = target_id
         tag.audio_id = None
     else:
+        logger.warning(f"save_assignment: type inconnu '{target_type}'")
         flash("Type de cible invalide.", "error")
         return redirect(url_for("assign"))
 
     db.session.add(tag)
     db.session.commit()
+    logger.info(f"save_assignment: tag {rfid_id} sauvegardé en base")
 
-    # Efface le dernier tag non assigné s'il correspond
     global _last_unassigned_tag
     if _last_unassigned_tag == rfid_id:
         _last_unassigned_tag = None
