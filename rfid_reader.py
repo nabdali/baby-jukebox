@@ -8,6 +8,8 @@ Fonctionnement :
     qui n'appelle jamais le callback (simulation silencieuse).
 """
 
+from __future__ import annotations
+
 import threading
 import time
 import logging

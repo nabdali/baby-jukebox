@@ -8,6 +8,8 @@ Démarre :
   4. Le serveur Flask
 """
 
+from __future__ import annotations
+
 import os
 import logging
 from pathlib import Path

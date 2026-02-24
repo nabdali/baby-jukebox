@@ -45,7 +45,8 @@ access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s %(D)sµs'
 # Process
 # ---------------------------------------------------------------------------
 proc_name = "baby-jukebox"
-pidfile   = "/run/baby-jukebox/gunicorn.pid"
+# Pas de pidfile : systemd gère le processus directement via son PID,
+# inutile d'écrire dans /run (qui est un tmpfs effacé au reboot)
 
 # ---------------------------------------------------------------------------
 # Hooks de cycle de vie
