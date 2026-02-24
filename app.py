@@ -74,14 +74,27 @@ def on_tag_detected(rfid_id: str):
         tag = Tag.query.filter_by(rfid_id=rfid_id).first()
         if tag:
             if tag.audio_id and tag.audio:
-                logger.info(f"Tag {rfid_id} → audio '{tag.audio.name}'")
-                player.play_file(tag.audio.file_path)
+                path = tag.audio.file_path
+                if not os.path.isfile(path):
+                    logger.error(f"Tag {rfid_id} → fichier introuvable : {path}")
+                    return
+                logger.info(f"Tag {rfid_id} → lecture audio '{tag.audio.name}' ({path})")
+                player.play_file(path)
             elif tag.playlist_id and tag.playlist:
-                logger.info(f"Tag {rfid_id} → playlist '{tag.playlist.name}'")
                 files = [a.file_path for a in tag.playlist.audios]
+                missing = [f for f in files if not os.path.isfile(f)]
+                if missing:
+                    logger.warning(f"Playlist : {len(missing)} fichier(s) introuvable(s) : {missing}")
+                files = [f for f in files if os.path.isfile(f)]
+                if not files:
+                    logger.error(f"Tag {rfid_id} → playlist '{tag.playlist.name}' vide ou tous les fichiers manquants")
+                    return
+                logger.info(f"Tag {rfid_id} → lecture playlist '{tag.playlist.name}' ({len(files)} pistes)")
                 player.play_playlist(files)
+            else:
+                logger.warning(f"Tag {rfid_id} en base mais sans audio ni playlist associé")
         else:
-            logger.info(f"Tag inconnu détecté, mémorisé pour assignation : {rfid_id}")
+            logger.info(f"Tag inconnu : {rfid_id} — mémorisé pour assignation")
             _last_unassigned_tag = rfid_id
 
 
@@ -131,6 +144,29 @@ def player_next():
 @app.route("/player/prev", methods=["POST"])
 def player_prev():
     player.prev_track()
+    return redirect(url_for("index"))
+
+
+@app.route("/play/audio/<int:audio_id>", methods=["POST"])
+def play_audio(audio_id: int):
+    audio = db.get_or_404(Audio, audio_id)
+    if not os.path.isfile(audio.file_path):
+        flash(f"Fichier introuvable : {audio.file_path}", "error")
+        return redirect(url_for("upload"))
+    player.play_file(audio.file_path)
+    flash(f"Lecture : {audio.name}", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/play/playlist/<int:playlist_id>", methods=["POST"])
+def play_playlist(playlist_id: int):
+    playlist = db.get_or_404(Playlist, playlist_id)
+    files = [a.file_path for a in playlist.audios if os.path.isfile(a.file_path)]
+    if not files:
+        flash(f"Aucune piste disponible dans '{playlist.name}'.", "error")
+        return redirect(url_for("playlists"))
+    player.play_playlist(files)
+    flash(f"Lecture playlist : {playlist.name} ({len(files)} pistes)", "success")
     return redirect(url_for("index"))
 
 

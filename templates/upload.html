@@ -48,6 +48,16 @@
         </svg>
         <span class="flex-1 truncate text-sm text-gray-200">{{ audio.name }}</span>
         <span class="text-xs text-gray-500 hidden sm:block">{{ audio.file_path.split('/')[-1] }}</span>
+        <!-- Bouton play -->
+        <form method="post" action="{{ url_for('play_audio', audio_id=audio.id) }}">
+          <button type="submit"
+                  class="text-green-400 hover:text-green-300 transition p-1" title="Lire">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+        </form>
+        <!-- Bouton supprimer -->
         <form method="post" action="{{ url_for('delete_audio', audio_id=audio.id) }}"
               onsubmit="return confirm('Supprimer « {{ audio.name }} » ?')">
           <button type="submit"
