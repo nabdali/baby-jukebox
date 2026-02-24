@@ -143,27 +143,25 @@
 
   const selectError = document.getElementById('select-error');
 
-  // Gère la sélection exclusive audio/playlist et alimente les hidden inputs
+  // Réinitialise l'autre select pour garder une sélection exclusive (UX)
   function setTargetType(type) {
-    if (type === 'audio' && selectAudio.value) {
-      targetTypeInput.value = 'audio';
-      targetIdInput.value = selectAudio.value;
-      selectPlaylist.value = '';
-    } else if (type === 'playlist' && selectPlaylist.value) {
-      targetTypeInput.value = 'playlist';
-      targetIdInput.value = selectPlaylist.value;
-      selectAudio.value = '';
-    } else {
-      // L'utilisateur a re-sélectionné "— Choisir —"
-      targetTypeInput.value = '';
-      targetIdInput.value = '';
-    }
+    if (type === 'audio' && selectAudio.value)       selectPlaylist.value = '';
+    else if (type === 'playlist' && selectPlaylist.value) selectAudio.value = '';
     selectError.classList.add('hidden');
   }
 
-  // Validation avant envoi
+  // Au submit : lit les selects directement — ne dépend PAS de onchange
   document.getElementById('assign-form').addEventListener('submit', function (e) {
-    if (!targetTypeInput.value || !targetIdInput.value) {
+    const audioVal    = selectAudio.value;
+    const playlistVal = selectPlaylist.value;
+
+    if (audioVal) {
+      targetTypeInput.value = 'audio';
+      targetIdInput.value   = audioVal;
+    } else if (playlistVal) {
+      targetTypeInput.value = 'playlist';
+      targetIdInput.value   = playlistVal;
+    } else {
       e.preventDefault();
       selectError.classList.remove('hidden');
     }
