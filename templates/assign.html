@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Tags RFID — Baby Jukebox{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+
+  <h1 class="text-2xl font-bold text-white">Association Tags RFID</h1>
+
+  <!-- Dernier tag non assigné -->
+  <div class="bg-gray-900 rounded-2xl p-6 space-y-4">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-200">Nouveau tag détecté</h2>
+      <span id="scan-indicator"
+            class="flex items-center gap-1.5 text-xs text-gray-500">
+        <span class="w-2 h-2 rounded-full bg-gray-600 animate-pulse"></span>
+        En attente d'un scan…
+      </span>
+    </div>
+
+    <div id="tag-banner"
+         class="{% if not last_tag %}hidden{% endif %} bg-brand/20 border border-brand/40
+                rounded-xl px-4 py-3 flex items-center gap-3">
+      <svg class="w-6 h-6 text-brand-light shrink-0" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M17.63 5.84C17.27 5.33 16.67 5 16 5L5 5.01C3.9 5.01 3 5.9 3 7v10c0 1.1.9 1.99 2 1.99L16 19c.67 0 1.27-.33 1.63-.84L22 12l-4.37-6.16Z"/>
+      </svg>
+      <div>
+        <p class="text-sm text-gray-300">Tag ID détecté :</p>
+        <p id="tag-id-display" class="font-mono font-bold text-brand-light text-lg">
+          {{ last_tag or '' }}
+        </p>
+      </div>
+    </div>
+
+    <p id="no-tag-msg" class="{% if last_tag %}hidden{% endif %} text-sm text-gray-500">
+      Aucun nouveau tag détecté. Scannez un tag RFID non encore assigné.
+    </p>
+
+    <!-- Formulaire d'association -->
+    <form id="assign-form" method="post" action="{{ url_for('save_assignment') }}"
+          class="{% if not last_tag %}opacity-50 pointer-events-none{% endif %} space-y-4">
+      <input type="hidden" name="rfid_id" id="rfid-id-input" value="{{ last_tag or '' }}" />
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <!-- Cible : Audio -->
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Associer à un audio</label>
+          <div class="flex gap-2">
+            <select name="target_id" id="select-audio"
+                    class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white
+                           focus:outline-none focus:border-brand transition text-sm"
+                    onchange="setTargetType('audio')">
+              <option value="">— Choisir —</option>
+              {% for audio in audios %}
+              <option value="{{ audio.id }}">{{ audio.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <!-- Cible : Playlist -->
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Ou à une playlist</label>
+          <select name="target_id" id="select-playlist"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white
+                         focus:outline-none focus:border-brand transition text-sm"
+                  onchange="setTargetType('playlist')">
+            <option value="">— Choisir —</option>
+            {% for pl in playlists %}
+            <option value="{{ pl.id }}">{{ pl.name }} ({{ pl.audios|length }} pistes)</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <input type="hidden" name="target_type" id="target-type-input" value="" />
+      <input type="hidden" name="target_id" id="target-id-input" value="" />
+
+      <button type="submit"
+              class="px-6 py-2 bg-brand hover:bg-brand-dark rounded-xl text-white font-medium transition">
+        Associer ce tag
+      </button>
+    </form>
+  </div>
+
+  <!-- Tags existants -->
+  <div>
+    <h2 class="text-lg font-semibold text-gray-200 mb-3">
+      Associations existantes
+      <span class="text-sm font-normal text-gray-500">({{ tags|length }})</span>
+    </h2>
+
+    {% if tags %}
+    <div class="space-y-2">
+      {% for tag in tags %}
+      <div class="flex items-center gap-3 bg-gray-900 rounded-xl px-4 py-3">
+        <svg class="w-5 h-5 text-gray-500 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M17.63 5.84C17.27 5.33 16.67 5 16 5L5 5.01C3.9 5.01 3 5.9 3 7v10c0 1.1.9 1.99 2 1.99L16 19c.67 0 1.27-.33 1.63-.84L22 12l-4.37-6.16Z"/>
+        </svg>
+        <span class="font-mono text-sm text-gray-400 w-28 shrink-0">{{ tag.rfid_id }}</span>
+        <svg class="w-4 h-4 text-gray-600 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M10 17l5-5-5-5v10z"/>
+        </svg>
+        <div class="flex items-center gap-2 flex-1 min-w-0">
+          {% if tag.type == 'audio' %}
+          <span class="px-2 py-0.5 bg-blue-900/60 text-blue-300 text-xs rounded-full shrink-0">audio</span>
+          {% elif tag.type == 'playlist' %}
+          <span class="px-2 py-0.5 bg-purple-900/60 text-purple-300 text-xs rounded-full shrink-0">playlist</span>
+          {% endif %}
+          <span class="text-sm text-gray-200 truncate">{{ tag.label or '—' }}</span>
+        </div>
+        <form method="post" action="{{ url_for('delete_tag', tag_id=tag.id) }}"
+              onsubmit="return confirm('Supprimer cette association ?')">
+          <button type="submit"
+                  class="text-red-500 hover:text-red-400 transition p-1" title="Supprimer">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12ZM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4Z"/>
+            </svg>
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-gray-500 text-sm">Aucune association enregistrée.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  const assignForm = document.getElementById('assign-form');
+  const tagBanner = document.getElementById('tag-banner');
+  const noTagMsg = document.getElementById('no-tag-msg');
+  const tagIdDisplay = document.getElementById('tag-id-display');
+  const rfidInput = document.getElementById('rfid-id-input');
+  const targetTypeInput = document.getElementById('target-type-input');
+  const targetIdInput = document.getElementById('target-id-input');
+  const selectAudio = document.getElementById('select-audio');
+  const selectPlaylist = document.getElementById('select-playlist');
+  const scanIndicator = document.getElementById('scan-indicator');
+
+  // Gère la sélection exclusive audio/playlist
+  function setTargetType(type) {
+    if (type === 'audio') {
+      targetTypeInput.value = 'audio';
+      targetIdInput.value = selectAudio.value;
+      selectPlaylist.value = '';
+    } else {
+      targetTypeInput.value = 'playlist';
+      targetIdInput.value = selectPlaylist.value;
+      selectAudio.value = '';
+    }
+  }
+
+  // Polling pour détecter un nouveau tag
+  let currentTag = {{ ('"' ~ last_tag ~ '"') if last_tag else 'null' }};
+
+  async function pollTag() {
+    try {
+      const res = await fetch('/api/last-tag');
+      const data = await res.json();
+      const newTag = data.tag_id;
+
+      if (newTag && newTag !== currentTag) {
+        currentTag = newTag;
+        tagIdDisplay.textContent = newTag;
+        rfidInput.value = newTag;
+        tagBanner.classList.remove('hidden');
+        noTagMsg.classList.add('hidden');
+        assignForm.classList.remove('opacity-50', 'pointer-events-none');
+        scanIndicator.innerHTML = `
+          <span class="w-2 h-2 rounded-full bg-green-500"></span>
+          <span class="text-green-400">Tag prêt à être associé</span>`;
+      } else if (!newTag && currentTag) {
+        // Le tag a été effacé (après assignation)
+        currentTag = null;
+        tagBanner.classList.add('hidden');
+        noTagMsg.classList.remove('hidden');
+        assignForm.classList.add('opacity-50', 'pointer-events-none');
+        scanIndicator.innerHTML = `
+          <span class="w-2 h-2 rounded-full bg-gray-600 animate-pulse"></span>
+          En attente d'un scan…`;
+      }
+    } catch (e) {
+      console.warn('Polling tag error:', e);
+    }
+  }
+
+  setInterval(pollTag, 1500);
+</script>
+{% endblock %}

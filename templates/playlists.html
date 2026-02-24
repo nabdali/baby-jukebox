@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Playlists — Baby Jukebox{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+
+  <h1 class="text-2xl font-bold text-white">Playlists</h1>
+
+  <!-- Formulaire de création -->
+  <div class="bg-gray-900 rounded-2xl p-6 space-y-4">
+    <h2 class="text-lg font-semibold text-gray-200">Créer une playlist</h2>
+    <form method="post" action="{{ url_for('create_playlist') }}" class="space-y-4">
+      <div>
+        <label class="block text-sm text-gray-400 mb-1" for="playlist-name">Nom</label>
+        <input id="playlist-name" type="text" name="name" required
+               placeholder="Ma super playlist…"
+               class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 text-white
+                      placeholder-gray-500 focus:outline-none focus:border-brand transition" />
+      </div>
+
+      <div>
+        <label class="block text-sm text-gray-400 mb-2">Pistes</label>
+        {% if audios %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+          {% for audio in audios %}
+          <label class="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2 cursor-pointer
+                        hover:bg-gray-700 transition">
+            <input type="checkbox" name="audio_ids" value="{{ audio.id }}"
+                   class="accent-brand w-4 h-4" />
+            <span class="text-sm text-gray-200 truncate">{{ audio.name }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-500">Aucun audio disponible — importez d'abord des fichiers.</p>
+        {% endif %}
+      </div>
+
+      <button type="submit"
+              class="px-6 py-2 bg-brand hover:bg-brand-dark rounded-xl text-white font-medium transition">
+        Créer
+      </button>
+    </form>
+  </div>
+
+  <!-- Liste des playlists -->
+  <div class="space-y-4">
+    <h2 class="text-lg font-semibold text-gray-200">
+      Mes playlists
+      <span class="text-sm font-normal text-gray-500">({{ playlists|length }})</span>
+    </h2>
+
+    {% if playlists %}
+      {% for pl in playlists %}
+      <div class="bg-gray-900 rounded-2xl p-5">
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <svg class="w-5 h-5 text-brand-light shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zm13.5-7.5L15 10l4.5 4.5L23 12l-6.5-3.5z"/>
+              </svg>
+              <h3 class="font-semibold text-white truncate">{{ pl.name }}</h3>
+              <span class="text-xs text-gray-500 shrink-0">{{ pl.audios|length }} piste(s)</span>
+            </div>
+            <ul class="ml-7 space-y-0.5">
+              {% for audio in pl.audios %}
+              <li class="text-xs text-gray-400 truncate">• {{ audio.name }}</li>
+              {% endfor %}
+              {% if pl.audios|length == 0 %}
+              <li class="text-xs text-gray-600 italic">Vide</li>
+              {% endif %}
+            </ul>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <a href="{{ url_for('edit_playlist', playlist_id=pl.id) }}"
+               class="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition"
+               title="Modifier">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25ZM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z"/>
+              </svg>
+            </a>
+            <form method="post" action="{{ url_for('delete_playlist', playlist_id=pl.id) }}"
+                  onsubmit="return confirm('Supprimer la playlist « {{ pl.name }} » ?')">
+              <button type="submit"
+                      class="p-2 rounded-lg bg-gray-800 hover:bg-red-900 text-gray-400 hover:text-red-400 transition"
+                      title="Supprimer">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12ZM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4Z"/>
+                </svg>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+    <p class="text-gray-500 text-sm">Aucune playlist créée.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

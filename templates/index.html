@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Lecteur — Baby Jukebox{% endblock %}
+
+{% block content %}
+<div class="flex flex-col items-center gap-8">
+
+  <!-- Pochette / indicateur visuel -->
+  <div class="relative w-52 h-52 sm:w-64 sm:h-64">
+    <div id="vinyl"
+         class="w-full h-full rounded-full bg-gradient-to-br from-gray-800 to-gray-900
+                border-4 border-gray-700 shadow-2xl flex items-center justify-center
+                transition-all duration-500"
+         style="animation: none;">
+      <div class="w-12 h-12 rounded-full bg-brand shadow-lg flex items-center justify-center">
+        <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="2"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- Infos piste en cours -->
+  <div class="text-center">
+    <p class="text-xs uppercase tracking-widest text-gray-500 mb-1">En cours</p>
+    <p id="media-name" class="text-xl font-semibold text-white truncate max-w-xs sm:max-w-md">
+      {{ media_name or "Rien en cours" }}
+    </p>
+    <p id="state-badge"
+       class="mt-2 inline-block px-3 py-0.5 rounded-full text-xs font-medium
+              {% if state == 'Playing' %}bg-green-700 text-green-100
+              {% elif state == 'Paused' %}bg-yellow-700 text-yellow-100
+              {% else %}bg-gray-700 text-gray-300{% endif %}">
+      {{ state }}
+    </p>
+  </div>
+
+  <!-- Barre de progression -->
+  <div class="w-full max-w-md">
+    <div class="flex justify-between text-xs text-gray-500 mb-1">
+      <span id="time-current">0:00</span>
+      <span id="time-total">0:00</span>
+    </div>
+    <div class="h-2 bg-gray-800 rounded-full overflow-hidden">
+      <div id="progress"
+           class="progress-bar h-full bg-brand rounded-full"
+           style="width: {{ (time_info.position * 100) | round(1) }}%">
+      </div>
+    </div>
+  </div>
+
+  <!-- Boutons de contrôle -->
+  <div class="flex items-center gap-4">
+
+    <!-- Précédent -->
+    <form method="post" action="{{ url_for('player_prev') }}">
+      <button type="submit"
+              class="p-3 rounded-full bg-gray-800 hover:bg-gray-700 transition text-gray-300 hover:text-white"
+              title="Piste précédente">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
+        </svg>
+      </button>
+    </form>
+
+    <!-- Stop -->
+    <form method="post" action="{{ url_for('player_stop') }}">
+      <button type="submit"
+              class="p-4 rounded-full bg-red-700 hover:bg-red-600 transition text-white shadow-lg"
+              title="Arrêter">
+        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M6 6h12v12H6z"/>
+        </svg>
+      </button>
+    </form>
+
+    <!-- Pause / Play -->
+    <form method="post" action="{{ url_for('player_pause') }}">
+      <button type="submit"
+              class="p-5 rounded-full bg-brand hover:bg-brand-dark transition text-white shadow-xl"
+              title="Pause / Reprendre">
+        <svg id="btn-icon" class="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
+          {% if state == 'Paused' %}
+          <!-- Play icon -->
+          <path d="M8 5v14l11-7z"/>
+          {% else %}
+          <!-- Pause icon -->
+          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+          {% endif %}
+        </svg>
+      </button>
+    </form>
+
+    <!-- Suivant -->
+    <form method="post" action="{{ url_for('player_next') }}">
+      <button type="submit"
+              class="p-3 rounded-full bg-gray-800 hover:bg-gray-700 transition text-gray-300 hover:text-white"
+              title="Piste suivante">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M6 18l8.5-6L6 6v12zm2-8.14 4.72 3.14L8 16.14V9.86zM16 6h2v12h-2z"/>
+        </svg>
+      </button>
+    </form>
+
+  </div>
+</div>
+
+<!-- Animation vinyle -->
+<style>
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spinning { animation: spin 3s linear infinite; }
+</style>
+
+<!-- Polling JS toutes les secondes -->
+<script>
+  const vinyl = document.getElementById('vinyl');
+  const mediaName = document.getElementById('media-name');
+  const stateBadge = document.getElementById('state-badge');
+  const progress = document.getElementById('progress');
+  const timeCurrent = document.getElementById('time-current');
+  const timeTotal = document.getElementById('time-total');
+  const btnIcon = document.getElementById('btn-icon');
+
+  const PLAY_ICON = `<path d="M8 5v14l11-7z"/>`;
+  const PAUSE_ICON = `<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>`;
+
+  function formatTime(s) {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${String(sec).padStart(2, '0')}`;
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+
+      // Nom de la piste
+      mediaName.textContent = data.media || 'Rien en cours';
+
+      // Badge état
+      stateBadge.textContent = data.state;
+      stateBadge.className = 'mt-2 inline-block px-3 py-0.5 rounded-full text-xs font-medium ';
+      if (data.state === 'Playing') {
+        stateBadge.className += 'bg-green-700 text-green-100';
+        vinyl.classList.add('spinning');
+        btnIcon.innerHTML = PAUSE_ICON;
+      } else if (data.state === 'Paused') {
+        stateBadge.className += 'bg-yellow-700 text-yellow-100';
+        vinyl.classList.remove('spinning');
+        btnIcon.innerHTML = PLAY_ICON;
+      } else {
+        stateBadge.className += 'bg-gray-700 text-gray-300';
+        vinyl.classList.remove('spinning');
+        btnIcon.innerHTML = PLAY_ICON;
+      }
+
+      // Barre de progression
+      progress.style.width = (data.position * 100).toFixed(1) + '%';
+      timeCurrent.textContent = formatTime(data.time);
+      timeTotal.textContent = formatTime(data.duration);
+    } catch (e) {
+      console.warn('Polling error:', e);
+    }
+  }
+
+  setInterval(poll, 1000);
+  poll();
+</script>
+{% endblock %}

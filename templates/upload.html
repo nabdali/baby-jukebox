@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Upload — Baby Jukebox{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+
+  <h1 class="text-2xl font-bold text-white">Importer des fichiers audio</h1>
+
+  <!-- Zone de drag & drop -->
+  <div id="drop-zone"
+       class="border-2 border-dashed border-gray-600 rounded-2xl p-10 text-center
+              transition hover:border-brand hover:bg-gray-900/50 cursor-pointer">
+    <form id="upload-form" method="post" enctype="multipart/form-data" action="{{ url_for('upload') }}">
+      <input id="file-input" type="file" name="files" multiple accept=".mp3,.ogg,.wav,.flac,.m4a"
+             class="hidden" />
+      <label for="file-input" class="cursor-pointer">
+        <svg class="w-14 h-14 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor"
+             stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M9 9l3-3m0 0l3 3m-3-3v12M5.25 20.25h13.5"/>
+        </svg>
+        <p class="text-lg font-medium text-gray-300">Glissez vos fichiers ici</p>
+        <p class="text-sm text-gray-500 mt-1">ou cliquez pour parcourir (MP3, OGG, WAV, FLAC, M4A — max 100 Mo)</p>
+      </label>
+      <div id="file-list" class="mt-4 text-sm text-gray-400 space-y-1"></div>
+      <button type="submit"
+              class="mt-6 hidden px-6 py-2 bg-brand hover:bg-brand-dark rounded-xl text-white font-medium transition"
+              id="submit-btn">
+        Uploader
+      </button>
+    </form>
+  </div>
+
+  <!-- Liste des audios existants -->
+  <div>
+    <h2 class="text-lg font-semibold text-gray-200 mb-3">
+      Bibliothèque
+      <span class="text-sm font-normal text-gray-500">({{ audios|length }} fichier(s))</span>
+    </h2>
+
+    {% if audios %}
+    <ul class="space-y-2">
+      {% for audio in audios %}
+      <li class="flex items-center gap-3 bg-gray-900 rounded-xl px-4 py-3">
+        <!-- Icône note musicale -->
+        <svg class="w-5 h-5 text-brand-light shrink-0" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6Z"/>
+        </svg>
+        <span class="flex-1 truncate text-sm text-gray-200">{{ audio.name }}</span>
+        <span class="text-xs text-gray-500 hidden sm:block">{{ audio.file_path.split('/')[-1] }}</span>
+        <form method="post" action="{{ url_for('delete_audio', audio_id=audio.id) }}"
+              onsubmit="return confirm('Supprimer « {{ audio.name }} » ?')">
+          <button type="submit"
+                  class="text-red-500 hover:text-red-400 transition p-1" title="Supprimer">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12ZM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4Z"/>
+            </svg>
+          </button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-gray-500 text-sm">Aucun fichier importé pour l'instant.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  const input = document.getElementById('file-input');
+  const fileList = document.getElementById('file-list');
+  const submitBtn = document.getElementById('submit-btn');
+  const dropZone = document.getElementById('drop-zone');
+
+  function updateList(files) {
+    fileList.innerHTML = '';
+    if (files.length === 0) { submitBtn.classList.add('hidden'); return; }
+    for (const f of files) {
+      const el = document.createElement('p');
+      el.textContent = `• ${f.name} (${(f.size / 1024 / 1024).toFixed(2)} Mo)`;
+      fileList.appendChild(el);
+    }
+    submitBtn.classList.remove('hidden');
+  }
+
+  input.addEventListener('change', () => updateList(input.files));
+
+  // Drag & drop
+  dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('border-brand', 'bg-gray-900/50');
+  });
+  dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('border-brand', 'bg-gray-900/50');
+  });
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('border-brand', 'bg-gray-900/50');
+    const dt = new DataTransfer();
+    for (const f of e.dataTransfer.files) dt.items.add(f);
+    input.files = dt.files;
+    updateList(input.files);
+  });
+</script>
+{% endblock %}

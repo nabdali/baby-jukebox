@@ -1,0 +1,9 @@
+Flask>=3.0
+Flask-SQLAlchemy>=3.1
+Werkzeug>=3.0
+python-vlc>=3.0.20123
+gunicorn>=22.0
+# Dépendances Raspberry Pi (installées automatiquement par install.sh sur Pi) :
+# mfrc522>=0.0.7
+# spidev>=3.6
+# RPi.GPIO>=0.7

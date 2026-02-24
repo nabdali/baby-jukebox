@@ -1,0 +1,98 @@
+# /etc/systemd/system/baby-jukebox.service
+#
+# Service systemd pour Baby Jukebox — Lecteur RFID Raspberry Pi
+#
+# Installation :
+#   sudo cp deploy/baby-jukebox.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now baby-jukebox
+#
+# Commandes utiles :
+#   sudo systemctl status baby-jukebox
+#   sudo journalctl -u baby-jukebox -f
+#   sudo systemctl restart baby-jukebox
+
+[Unit]
+Description=Baby Jukebox — Lecteur de musique RFID
+Documentation=https://github.com/your/baby-jukebox
+After=network.target sound.target
+Wants=sound.target
+# Si vous utilisez une BDD distante ou un montage réseau :
+# After=network-online.target
+
+[Service]
+# ---------------------------------------------------------------------------
+# Identité du processus
+# ---------------------------------------------------------------------------
+Type=simple
+User=pi
+Group=pi
+# Groupes supplémentaires requis sur Raspberry Pi :
+#   audio → VLC/ALSA (sortie jack)
+#   spi   → module RC522 via SPI
+#   gpio  → RPi.GPIO pour le RC522
+#   video → nécessaire pour certaines versions de VLC sur Pi
+SupplementaryGroups=audio spi gpio video
+
+# ---------------------------------------------------------------------------
+# Répertoire de travail et environnement
+# ---------------------------------------------------------------------------
+WorkingDirectory=/home/pi/baby-jukebox
+
+# Chemin vers le venv Python
+Environment="PATH=/home/pi/baby-jukebox/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Flask en mode production
+Environment="FLASK_ENV=production"
+
+# Clé secrète Flask — changez cette valeur !
+Environment="SECRET_KEY=changez-moi-en-production-avec-une-vraie-cle-aleatoire"
+
+# VLC sans interface graphique (headless)
+Environment="DISPLAY="
+
+# Force la sortie audio sur la prise jack (0=auto, 1=jack, 2=hdmi)
+Environment="AUDIODEV=hw:0,0"
+
+# ---------------------------------------------------------------------------
+# Commande de démarrage
+# ---------------------------------------------------------------------------
+ExecStart=/home/pi/baby-jukebox/venv/bin/gunicorn \
+    --config /home/pi/baby-jukebox/deploy/gunicorn.conf.py \
+    wsgi:application
+
+# Commande de rechargement gracieux (sans coupure de service)
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# ---------------------------------------------------------------------------
+# Politique de redémarrage
+# ---------------------------------------------------------------------------
+Restart=on-failure
+RestartSec=5s
+# Nombre max de redémarrages en 60 secondes avant abandon
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# ---------------------------------------------------------------------------
+# Logging (journald — `journalctl -u baby-jukebox -f`)
+# ---------------------------------------------------------------------------
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=baby-jukebox
+
+# ---------------------------------------------------------------------------
+# Sécurité (durcissement systemd)
+# ---------------------------------------------------------------------------
+# Empêche d'écrire hors du répertoire de l'app et /var/log/baby-jukebox
+PrivateTmp=true
+NoNewPrivileges=true
+# Lecture seule sur /boot, /usr (l'app n'en a pas besoin)
+ProtectSystem=strict
+# Exceptions en écriture : données et logs
+ReadWritePaths=/home/pi/baby-jukebox /var/log/baby-jukebox /run/baby-jukebox /dev/shm
+# Accès au son et au SPI
+DeviceAllow=/dev/snd rw
+DeviceAllow=/dev/spidev0.0 rw
+
+[Install]
+WantedBy=multi-user.target
