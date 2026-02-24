@@ -133,7 +133,8 @@ def _download_youtube(job_id: str, url: str) -> None:
         import yt_dlp  # type: ignore
 
         ydl_opts = {
-            "format": "bestaudio/best",
+            # m4a (iOS) en priorité, puis n'importe quel audio, puis flux complet
+            "format": "bestaudio[ext=m4a]/bestaudio/best",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
@@ -144,8 +145,9 @@ def _download_youtube(job_id: str, url: str) -> None:
             "nooverwrites": True,
             "quiet": True,
             "no_warnings": True,
-            # Client iOS : contourne les 403 YouTube sur Raspberry Pi / ARM
-            "extractor_args": {"youtube": {"player_client": ["ios"]}},
+            # ios : contourne les 403 sur Raspberry Pi / ARM
+            # web : fallback si ios ne fournit pas le format demandé
+            "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
