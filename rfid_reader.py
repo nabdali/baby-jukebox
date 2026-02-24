@@ -36,8 +36,7 @@ class RFIDReader:
         self._callback = on_tag_detected
         self._thread = threading.Thread(target=self._run, daemon=True, name="rfid-reader")
         self._running = False
-        self._last_id: str | None = None   # UID du tag actuellement posé
-        self._tag_present: bool = False    # tag détecté au cycle précédent
+        self._last_triggered_id: str | None = None  # dernier UID ayant déclenché le callback
 
     def start(self):
         self._running = True
@@ -95,20 +94,12 @@ class RFIDReader:
                             n = n * 256 + byte
                         tag_str = str(n)
 
-                        # Déclenche le callback uniquement sur le front montant :
-                        # - nouveau tag posé (UID différent du précédent), OU
-                        # - tag reposé après avoir été retiré (_tag_present == False)
-                        if not self._tag_present or tag_str != self._last_id:
-                            self._last_id = tag_str
+                        # Déclenche uniquement si l'UID est différent du dernier
+                        # tag ayant déclenché le callback — même tag retiré/reposé = silence
+                        if tag_str != self._last_triggered_id:
+                            self._last_triggered_id = tag_str
                             logger.info(f"Tag détecté : {tag_str}")
                             self._callback(tag_str)
-
-                        self._tag_present = True
-                else:
-                    # Aucun tag dans le champ — réinitialise l'état
-                    if self._tag_present:
-                        logger.debug(f"Tag retiré : {self._last_id}")
-                    self._tag_present = False
 
             except Exception as e:
                 logger.error(f"Erreur lecture RFID : {e}")
