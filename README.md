@@ -91,6 +91,7 @@ SCLK(11)[23][24] CE0(8) ←── RC522 SDA
 | Audio | **python-vlc** (libvlc) | Lecture MP3/OGG/WAV/FLAC |
 | RFID | **mfrc522** + spidev + RPi.GPIO | Lecture RC522 via SPI |
 | Thread RFID | `threading.Thread(daemon=True)` | Non-bloquant pour Flask |
+| YouTube | **yt-dlp** + **ffmpeg** | Recherche et téléchargement d'audio depuis YouTube |
 | Frontend | **Jinja2** + **TailwindCSS** (CDN) | Interface mobile-first |
 | Service OS | **systemd** | Démarrage automatique, restart |
 
@@ -168,10 +169,10 @@ sudo ./deploy/install.sh
 ```
 
 Le script effectue automatiquement :
-- `apt-get` des dépendances système (VLC, Python, alsa-utils)
+- `apt-get` des dépendances système (VLC, Python, alsa-utils, **ffmpeg**)
 - Activation du SPI dans `/boot/config.txt` si nécessaire
 - Ajout de l'utilisateur aux groupes `audio`, `spi`, `gpio`, `video`
-- Création du virtualenv Python et installation des packages (dont `gunicorn`)
+- Création du virtualenv Python et installation des packages (dont `gunicorn`, **`yt-dlp`**)
 - Détection automatique du Raspberry Pi → installation de `mfrc522`, `spidev`, `RPi.GPIO`
 - Création du répertoire `/var/log/baby-jukebox`
 - Installation et activation du service systemd
@@ -527,7 +528,7 @@ sudo systemctl restart baby-jukebox
 | URL | Page | Fonctionnalité |
 |---|---|---|
 | `/` | Lecteur | Affiche la piste en cours, contrôles stop/pause/prev/next, barre de progression (polling JS toutes les secondes) |
-| `/upload` | Import | Upload de fichiers MP3/OGG/WAV/FLAC/M4A par glisser-déposer, liste et suppression des audios |
+| `/upload` | Import | Upload de fichiers MP3/OGG/WAV/FLAC/M4A par glisser-déposer ; recherche YouTube et téléchargement d'audio en arrière-plan ; liste et suppression des audios |
 | `/playlists` | Playlists | Création de playlists à partir des audios importés, édition, suppression |
 | `/assign` | Tags RFID | Affiche le dernier tag scanné non assigné (polling JS), association à un audio ou une playlist, liste des associations existantes |
 
@@ -540,7 +541,7 @@ sudo systemctl restart baby-jukebox
 ```
 RC522 (SPI)
     │
-    ↓ polling toutes les 300ms (debounce 2s)
+    ↓ polling toutes les 100ms (déclenchement sur changement d'UID uniquement)
 [Thread RFID daemon]  ←── daemon=True, ne bloque pas Flask
     │
     ↓ tag détecté
@@ -664,6 +665,39 @@ sudo journalctl -u baby-jukebox -n 100
 sudo systemctl reset-failed baby-jukebox
 sudo systemctl start baby-jukebox
 ```
+
+### Téléchargement YouTube en erreur
+
+```bash
+# Vérifier que yt-dlp est installé dans le venv
+/home/pi/baby-jukebox/venv/bin/pip show yt-dlp
+
+# Si absent :
+/home/pi/baby-jukebox/venv/bin/pip install yt-dlp
+
+# Vérifier que ffmpeg est disponible (requis pour la conversion MP3)
+ffmpeg -version
+# Si absent :
+sudo apt install -y ffmpeg
+
+# Tester un téléchargement manuel hors service
+source /home/pi/baby-jukebox/venv/bin/activate
+yt-dlp -x --audio-format mp3 "https://www.youtube.com/watch?v=dQw4w9WgXcQ" \
+    -o "/tmp/test.%(ext)s"
+
+# Mettre à jour yt-dlp si YouTube bloque les téléchargements
+/home/pi/baby-jukebox/venv/bin/pip install -U yt-dlp
+sudo systemctl restart baby-jukebox
+```
+
+| Symptôme | Cause probable | Solution |
+|---|---|---|
+| `yt-dlp non installé` dans l'interface | yt-dlp absent du venv | `pip install yt-dlp` dans le venv |
+| `ERROR: Postprocessing: ffprobe and ffmpeg not found` | ffmpeg manquant | `sudo apt install ffmpeg` |
+| `Sign in to confirm you're not a bot` | YouTube bloque la requête | Mettre à jour yt-dlp (`pip install -U yt-dlp`) |
+| Téléchargement en `…` bloqué indéfiniment | Erreur silencieuse dans le thread | Voir `journalctl -u baby-jukebox -n 50` |
+
+---
 
 ### Espace disque plein (uploads)
 

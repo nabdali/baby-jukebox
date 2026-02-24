@@ -54,6 +54,7 @@ apt-get install -y --no-install-recommends \
     python3-pip     \
     git             \
     alsa-utils      \
+    ffmpeg          \
     2>/dev/null
 
 success "Dépendances système installées"

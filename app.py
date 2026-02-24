@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import os
 import logging
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from flask import (
@@ -61,6 +63,13 @@ player = Player()
 # Dernier tag RFID scanné qui n'est pas encore assigné en base
 _last_unassigned_tag: str | None = None
 
+# ---------------------------------------------------------------------------
+# YouTube — exécuteur de téléchargement (1 worker : file d'attente FIFO)
+# ---------------------------------------------------------------------------
+
+_yt_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="yt-dl")
+_yt_jobs: dict[str, dict] = {}  # job_id → {status, audio_name?, message?}
+
 
 def on_tag_detected(rfid_id: str):
     """
@@ -104,6 +113,63 @@ def on_tag_detected(rfid_id: str):
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _fmt_duration(seconds) -> str:
+    """Formate une durée en secondes → MM:SS ou H:MM:SS."""
+    if not seconds:
+        return "?"
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _download_youtube(job_id: str, url: str) -> None:
+    """Télécharge l'audio d'une vidéo YouTube et l'enregistre en base.
+    Tourne dans le thread pool yt-dl — ne pas appeler directement depuis Flask.
+    Requiert ffmpeg installé sur le système (sudo apt install ffmpeg).
+    """
+    try:
+        import yt_dlp  # type: ignore
+
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+            # Nomme le fichier par l'ID vidéo → nom prévisible, pas de conflit
+            "outtmpl": str(UPLOAD_FOLDER / "%(id)s.%(ext)s"),
+            "nooverwrites": True,
+            "quiet": True,
+            "no_warnings": True,
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            video_id = info["id"]
+            title = info["title"]
+
+        dest_mp3 = UPLOAD_FOLDER / f"{video_id}.mp3"
+
+        with app.app_context():
+            if not Audio.query.filter_by(file_path=dest_mp3.name).first():
+                audio = Audio(name=title, file_path=dest_mp3.name)
+                db.session.add(audio)
+                db.session.commit()
+
+        # Nettoyage : on garde seulement les 100 derniers jobs en mémoire
+        if len(_yt_jobs) > 100:
+            oldest = list(_yt_jobs.keys())[0]
+            _yt_jobs.pop(oldest, None)
+
+        _yt_jobs[job_id] = {"status": "done", "audio_name": title}
+        logger.info(f"YouTube téléchargé : '{title}' ({dest_mp3.name})")
+
+    except Exception as e:
+        logger.error(f"Erreur téléchargement YouTube (job {job_id}) : {e}")
+        _yt_jobs[job_id] = {"status": "error", "message": str(e)}
 
 
 def audio_abs_path(file_path: str) -> str:
@@ -212,6 +278,73 @@ def api_clear_last_tag():
     global _last_unassigned_tag
     _last_unassigned_tag = None
     return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Routes — YouTube
+# ---------------------------------------------------------------------------
+
+@app.route("/api/youtube/search")
+def youtube_search():
+    """Recherche des vidéos YouTube via yt-dlp et retourne les métadonnées en JSON."""
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify(results=[])
+    try:
+        import yt_dlp  # type: ignore
+
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch8:{q}", download=False)
+
+        results = []
+        for entry in (info.get("entries") or []):
+            vid_id = entry.get("id", "")
+            results.append({
+                "id": vid_id,
+                "title": entry.get("title", "Sans titre"),
+                "duration": _fmt_duration(entry.get("duration")),
+                "uploader": entry.get("uploader") or entry.get("channel") or "",
+                # Thumbnail standard YouTube — pas besoin de l'extraire via yt-dlp
+                "thumbnail": f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg",
+                "url": f"https://www.youtube.com/watch?v={vid_id}",
+            })
+        return jsonify(results=results)
+
+    except ImportError:
+        return jsonify(error="yt-dlp non installé (pip install yt-dlp)"), 500
+    except Exception as e:
+        logger.error(f"Erreur recherche YouTube : {e}")
+        return jsonify(error=str(e)), 500
+
+
+@app.route("/youtube/download", methods=["POST"])
+def youtube_download():
+    """Lance le téléchargement d'une vidéo YouTube en tâche de fond."""
+    url = request.form.get("url", "").strip()
+    if not url:
+        return jsonify(error="URL manquante"), 400
+    # Accepte aussi un simple ID vidéo
+    if not url.startswith("http"):
+        url = f"https://www.youtube.com/watch?v={url}"
+
+    job_id = uuid.uuid4().hex[:10]
+    _yt_jobs[job_id] = {"status": "pending"}
+    _yt_executor.submit(_download_youtube, job_id, url)
+    return jsonify(job_id=job_id)
+
+
+@app.route("/api/youtube/status/<job_id>")
+def youtube_job_status(job_id: str):
+    """Retourne l'état d'un téléchargement YouTube (polling JS)."""
+    job = _yt_jobs.get(job_id)
+    if not job:
+        return jsonify(error="Job inconnu"), 404
+    return jsonify(**job)
 
 
 # ---------------------------------------------------------------------------

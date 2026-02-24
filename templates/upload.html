@@ -31,6 +31,45 @@
     </form>
   </div>
 
+  <!-- Section YouTube -->
+  <div class="bg-gray-900 rounded-2xl p-6 space-y-4">
+    <h2 class="text-lg font-semibold text-gray-200 flex items-center gap-2">
+      <svg class="w-5 h-5 text-red-500 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.75 15.5v-7l6.25 3.5-6.25 3.5Z"/>
+      </svg>
+      Télécharger depuis YouTube
+    </h2>
+
+    <!-- Barre de recherche -->
+    <div class="flex gap-2">
+      <input id="yt-search-input" type="text" placeholder="Titre, artiste, album…"
+             class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 text-white
+                    placeholder-gray-500 focus:outline-none focus:border-brand transition text-sm"
+             onkeydown="if(event.key==='Enter') searchYoutube()" />
+      <button onclick="searchYoutube()"
+              class="px-4 py-2 bg-brand hover:bg-brand-dark rounded-xl text-white text-sm font-medium transition shrink-0">
+        Rechercher
+      </button>
+    </div>
+
+    <!-- Résultats de recherche -->
+    <div id="yt-results" class="space-y-2"></div>
+
+    <!-- Séparateur + URL directe -->
+    <div class="border-t border-gray-800 pt-4">
+      <p class="text-xs text-gray-500 mb-2">Ou collez une URL YouTube directement :</p>
+      <div class="flex gap-2">
+        <input id="yt-url-input" type="text" placeholder="https://www.youtube.com/watch?v=…"
+               class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 text-white
+                      placeholder-gray-500 focus:outline-none focus:border-brand transition text-sm" />
+        <button onclick="downloadFromUrl()"
+                class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-xl text-white text-sm font-medium transition shrink-0">
+          ↓ Télécharger
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Liste des audios existants -->
   <div>
     <h2 class="text-lg font-semibold text-gray-200 mb-3">
@@ -77,6 +116,121 @@
 </div>
 
 <script>
+  // ---------------------------------------------------------------------------
+  // YouTube
+  // ---------------------------------------------------------------------------
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function showToast(msg, type = 'success') {
+    const t = document.createElement('div');
+    t.className = `fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl text-white text-sm font-medium shadow-xl transition
+                   ${type === 'success' ? 'bg-green-700' : 'bg-red-700'}`;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 4000);
+  }
+
+  async function searchYoutube() {
+    const q = document.getElementById('yt-search-input').value.trim();
+    if (!q) return;
+
+    const resultsEl = document.getElementById('yt-results');
+    resultsEl.innerHTML = '<p class="text-gray-500 text-sm animate-pulse">Recherche en cours…</p>';
+
+    try {
+      const res = await fetch('/api/youtube/search?q=' + encodeURIComponent(q));
+      const data = await res.json();
+
+      if (data.error) {
+        resultsEl.innerHTML = `<p class="text-red-400 text-sm">Erreur : ${escHtml(data.error)}</p>`;
+        return;
+      }
+      if (!data.results.length) {
+        resultsEl.innerHTML = '<p class="text-gray-500 text-sm">Aucun résultat.</p>';
+        return;
+      }
+
+      resultsEl.innerHTML = data.results.map(r => `
+        <div class="flex items-center gap-3 bg-gray-800 rounded-xl p-3">
+          <img src="${r.thumbnail}" alt=""
+               class="w-24 h-16 object-cover rounded-lg shrink-0 bg-gray-700"
+               loading="lazy" onerror="this.style.display='none'" />
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-white truncate" title="${escHtml(r.title)}">${escHtml(r.title)}</p>
+            <p class="text-xs text-gray-400 mt-0.5">${escHtml(r.uploader)} · ${r.duration}</p>
+          </div>
+          <button id="btn-${r.id}"
+                  onclick="startDownload('${escHtml(r.url)}', '${r.id}')"
+                  class="shrink-0 px-3 py-1.5 bg-brand hover:bg-brand-dark text-white text-xs
+                         font-medium rounded-lg transition whitespace-nowrap">
+            ↓ Télécharger
+          </button>
+        </div>
+      `).join('');
+    } catch (e) {
+      resultsEl.innerHTML = `<p class="text-red-400 text-sm">Erreur réseau : ${escHtml(e.message)}</p>`;
+    }
+  }
+
+  async function downloadFromUrl() {
+    const url = document.getElementById('yt-url-input').value.trim();
+    if (!url) return;
+    const btn = document.querySelector('#yt-url-input + button') ||
+                document.querySelector('[onclick="downloadFromUrl()"]');
+    await startDownload(url, null, btn);
+  }
+
+  async function startDownload(url, videoId, btnOverride) {
+    const btn = btnOverride || (videoId ? document.getElementById('btn-' + videoId) : null);
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+    try {
+      const fd = new FormData();
+      fd.append('url', url);
+      const res = await fetch('/youtube/download', { method: 'POST', body: fd });
+      const { job_id, error } = await res.json();
+
+      if (error) {
+        if (btn) { btn.textContent = '✗ Erreur'; btn.disabled = false; }
+        showToast('Erreur : ' + error, 'error');
+        return;
+      }
+
+      // Polling jusqu'à fin du téléchargement
+      const iv = setInterval(async () => {
+        try {
+          const r = await fetch('/api/youtube/status/' + job_id);
+          const data = await r.json();
+
+          if (data.status === 'done') {
+            clearInterval(iv);
+            if (btn) {
+              btn.textContent = '✓ Importé';
+              btn.classList.replace('bg-brand', 'bg-green-700');
+              btn.classList.replace('hover:bg-brand-dark', 'hover:bg-green-800');
+            }
+            showToast('Téléchargé : ' + data.audio_name);
+          } else if (data.status === 'error') {
+            clearInterval(iv);
+            if (btn) { btn.textContent = '✗ Erreur'; btn.disabled = false; }
+            showToast('Erreur : ' + data.message, 'error');
+          }
+        } catch (_) { /* réseau temporairement indisponible, on réessaie */ }
+      }, 1500);
+
+    } catch (e) {
+      if (btn) { btn.textContent = '✗ Erreur'; btn.disabled = false; }
+      showToast('Erreur réseau : ' + e.message, 'error');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Upload fichiers
+  // ---------------------------------------------------------------------------
+
   const input = document.getElementById('file-input');
   const fileList = document.getElementById('file-list');
   const submitBtn = document.getElementById('submit-btn');
