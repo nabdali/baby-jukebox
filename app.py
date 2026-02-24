@@ -131,7 +131,7 @@ def _yt_base_opts() -> dict:
     opts: dict = {
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": ["android", "ios", "tv_embedded"]}},
+        "extractor_args": {"youtube": {"player_client": ["ios", "tv_embedded"]}},
     }
     if YT_COOKIES_FILE.exists():
         opts["cookiefile"] = str(YT_COOKIES_FILE)
