@@ -34,7 +34,6 @@ APP_USER="${APP_USER:-pi}"
 APP_DIR="${APP_DIR:-/home/${APP_USER}/baby-jukebox}"
 VENV_DIR="${APP_DIR}/venv"
 LOG_DIR="/var/log/baby-jukebox"
-RUN_DIR="/run/baby-jukebox"
 SERVICE_NAME="baby-jukebox"
 
 id "$APP_USER" &>/dev/null || error "L'utilisateur '$APP_USER' n'existe pas. Définissez APP_USER."
@@ -53,7 +52,6 @@ apt-get install -y --no-install-recommends \
     python3         \
     python3-venv    \
     python3-pip     \
-    nginx           \
     git             \
     alsa-utils      \
     2>/dev/null
@@ -80,6 +78,10 @@ fi
 # ---------------------------------------------------------------------------
 section "Configuration des groupes"
 
+# audio → VLC/ALSA (sortie jack)
+# spi   → module RC522 via SPI
+# gpio  → RPi.GPIO pour le RC522 (/dev/gpiomem)
+# video → nécessaire pour certaines versions de VLC sur Pi
 for grp in audio spi gpio video; do
     if getent group "$grp" &>/dev/null; then
         if ! id -nG "$APP_USER" | grep -qw "$grp"; then
@@ -156,19 +158,13 @@ fi
 success "Environnement Python prêt"
 
 # ---------------------------------------------------------------------------
-# 6. Répertoires de logs et de runtime
+# 6. Répertoire de logs
 # ---------------------------------------------------------------------------
 section "Répertoires système"
 
 install -d -m 755 -o "$APP_USER" -g "$APP_USER" "$LOG_DIR"
-install -d -m 755 -o "$APP_USER" -g "$APP_USER" "$RUN_DIR"
 
-# Fichier tmpfiles.d pour recréer /run/baby-jukebox après reboot
-cat > /etc/tmpfiles.d/baby-jukebox.conf <<EOF
-d /run/baby-jukebox 0755 ${APP_USER} ${APP_USER} -
-EOF
-
-success "Dossiers $LOG_DIR et $RUN_DIR créés"
+success "Dossier $LOG_DIR créé"
 
 # ---------------------------------------------------------------------------
 # 7. Service systemd
@@ -194,29 +190,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 8. Nginx
-# ---------------------------------------------------------------------------
-section "Configuration Nginx"
-
-cp "${APP_DIR}/deploy/nginx.conf" "/etc/nginx/sites-available/${SERVICE_NAME}"
-
-# Patch du chemin dans la config Nginx
-sed -i "s|/home/pi/baby-jukebox|${APP_DIR}|g" "/etc/nginx/sites-available/${SERVICE_NAME}"
-
-ln -sf "/etc/nginx/sites-available/${SERVICE_NAME}" \
-       "/etc/nginx/sites-enabled/${SERVICE_NAME}"
-
-# Désactive la config par défaut si encore active
-if [[ -L /etc/nginx/sites-enabled/default ]]; then
-    rm -f /etc/nginx/sites-enabled/default
-    info "Config nginx 'default' désactivée"
-fi
-
-nginx -t && systemctl reload nginx
-success "Nginx configuré et rechargé"
-
-# ---------------------------------------------------------------------------
-# 9. Logrotate
+# 8. Logrotate
 # ---------------------------------------------------------------------------
 section "Rotation des logs"
 
@@ -246,7 +220,7 @@ PI_IP=$(hostname -I | awk '{print $1}')
 echo -e "
 ${GREEN}${BOLD}Baby Jukebox est opérationnel !${RESET}
 
-  Application : ${CYAN}http://${PI_IP}${RESET}
+  Application : ${CYAN}http://${PI_IP}:5000${RESET}
   Logs        : ${CYAN}sudo journalctl -u ${SERVICE_NAME} -f${RESET}
   Status      : ${CYAN}sudo systemctl status ${SERVICE_NAME}${RESET}
   Restart     : ${CYAN}sudo systemctl restart ${SERVICE_NAME}${RESET}
@@ -254,5 +228,6 @@ ${GREEN}${BOLD}Baby Jukebox est opérationnel !${RESET}
 ${YELLOW}Actions post-installation :${RESET}
   1. Modifiez SECRET_KEY dans /etc/systemd/system/${SERVICE_NAME}.service
      puis : sudo systemctl daemon-reload && sudo systemctl restart ${SERVICE_NAME}
+     Générer une clé : python3 -c \"import secrets; print(secrets.token_hex(32))\"
   2. Si SPI vient d'être activé, redémarrez le Pi : sudo reboot
 "

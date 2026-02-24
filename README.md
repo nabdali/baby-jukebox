@@ -19,7 +19,6 @@ Lecteur de musique RFID pour Raspberry Pi. Approchez un tag NFC/RFID du lecteur 
    - [Service systemd](#service-systemd)
    - [Logs](#logs)
    - [Audio](#audio)
-   - [Nginx](#nginx)
    - [Mise à jour de l'application](#mise-à-jour-de-lapplication)
    - [Base de données](#base-de-données)
    - [Debug et diagnostic](#debug-et-diagnostic)
@@ -66,7 +65,7 @@ IRQ              ───→   Non connecté
     3.3V [1] [2] 5V
      SDA [3] [4] 5V
      SCL [5] [6] GND ←── RC522 GND
-      — [7] [8]  —
+      —  [7] [8]  —
      GND [9][10]  —
       — [11][12]  —
       — [13][14] GND
@@ -86,15 +85,16 @@ SCLK(11)[23][24] CE0(8) ←── RC522 SDA
 
 | Couche | Technologie | Rôle |
 |---|---|---|
-| Serveur HTTP | **Gunicorn** (gthread, 1 worker) | Serveur WSGI de production |
+| Serveur HTTP | **Gunicorn** (gthread, 1 worker) | Serveur WSGI de production, écoute sur `:5000` |
 | Backend | **Flask 3** + Flask-SQLAlchemy | Routes, logique métier |
 | Base de données | **SQLite** (via SQLAlchemy) | Audios, playlists, tags |
 | Audio | **python-vlc** (libvlc) | Lecture MP3/OGG/WAV/FLAC |
-| RFID | **mfrc522** + spidev | Lecture RC522 via SPI |
+| RFID | **mfrc522** + spidev + RPi.GPIO | Lecture RC522 via SPI |
 | Thread RFID | `threading.Thread(daemon=True)` | Non-bloquant pour Flask |
-| Reverse proxy | **Nginx** | Compression, uploads, port 80 |
 | Frontend | **Jinja2** + **TailwindCSS** (CDN) | Interface mobile-first |
 | Service OS | **systemd** | Démarrage automatique, restart |
+
+> **Python 3.9+ requis.** L'application utilise `from __future__ import annotations` pour la compatibilité avec Python 3.9 (Raspberry Pi OS Bullseye).
 
 ---
 
@@ -124,8 +124,6 @@ baby-jukebox/
 └── deploy/
     ├── baby-jukebox.service  # Unit systemd
     ├── gunicorn.conf.py      # Configuration Gunicorn
-    ├── nginx.conf            # Configuration Nginx (reverse proxy)
-    ├── maintenance.html      # Page d'erreur Nginx 502/503
     └── install.sh            # Script d'installation automatisé
 ```
 
@@ -152,7 +150,7 @@ baby-jukebox/
 
 ### Installation automatisée
 
-> C'est la méthode recommandée pour la production. Le script gère tout.
+> C'est la méthode recommandée. Le script gère tout en une seule commande.
 
 **1. Cloner le dépôt sur le Pi**
 
@@ -170,14 +168,13 @@ sudo ./deploy/install.sh
 ```
 
 Le script effectue automatiquement :
-- `apt-get` des dépendances système (VLC, Python, Nginx, alsa-utils)
+- `apt-get` des dépendances système (VLC, Python, alsa-utils)
 - Activation du SPI dans `/boot/config.txt` si nécessaire
 - Ajout de l'utilisateur aux groupes `audio`, `spi`, `gpio`, `video`
-- Création du virtualenv Python et installation des packages
+- Création du virtualenv Python et installation des packages (dont `gunicorn`)
 - Détection automatique du Raspberry Pi → installation de `mfrc522`, `spidev`, `RPi.GPIO`
-- Création des répertoires `/var/log/baby-jukebox` et `/run/baby-jukebox`
+- Création du répertoire `/var/log/baby-jukebox`
 - Installation et activation du service systemd
-- Configuration de Nginx en reverse proxy
 - Configuration de la rotation des logs (logrotate)
 
 **3. Redémarrer si le SPI vient d'être activé**
@@ -189,9 +186,12 @@ sudo reboot
 **4. Changer la SECRET_KEY Flask**
 
 ```bash
+# Générer une clé aléatoire
+python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# L'éditer dans le unit systemd
 sudo nano /etc/systemd/system/baby-jukebox.service
 # Modifier la ligne : Environment="SECRET_KEY=..."
-# Générer une clé aléatoire : python3 -c "import secrets; print(secrets.token_hex(32))"
 
 sudo systemctl daemon-reload
 sudo systemctl restart baby-jukebox
@@ -204,7 +204,7 @@ sudo systemctl restart baby-jukebox
 hostname -I
 ```
 
-Ouvrir `http://<IP_DU_PI>` dans un navigateur.
+Ouvrir **`http://<IP_DU_PI>:5000`** dans un navigateur depuis n'importe quel appareil sur le réseau local.
 
 ---
 
@@ -229,9 +229,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Application disponible sur `http://localhost:5000`.
+Application disponible sur `http://localhost:5001`.
 
-> En dehors d'un Raspberry Pi, `mfrc522` n'est pas installé → le thread RFID s'active en mode mock et aucune erreur n'est levée. VLC doit être installé sur la machine hôte (`brew install vlc` sur macOS, `sudo apt install vlc` sur Linux).
+> En dehors d'un Raspberry Pi, `mfrc522` n'est pas installé → le thread RFID s'active en mode mock sans erreur. VLC doit être installé sur la machine hôte (`brew install vlc` sur macOS, `sudo apt install vlc` sur Linux).
 
 ---
 
@@ -240,15 +240,18 @@ Application disponible sur `http://localhost:5000`.
 ### Vue d'ensemble
 
 ```
-Requête HTTP
-     │
-  [Nginx :80]  ─── fichiers statiques/uploads servis directement
-     │
-[Gunicorn :5000]  1 worker + 4 threads (état mémoire partagé)
-     │
-  [Flask]
-   ├── Thread RFID daemon (RC522 → VLC)
-   └── Lecteur VLC (sortie ALSA/jack)
+Appareil (téléphone / PC)
+          │
+    réseau local
+          │
+  [Gunicorn :5000]   ←── écoute sur 0.0.0.0:5000
+    1 worker + 4 threads
+          │
+       [Flask]
+        ├── Thread RFID daemon  (RC522 → callback → VLC)
+        └── Lecteur VLC         (sortie ALSA/jack)
+          │
+       [SQLite]
 ```
 
 ### Pourquoi `workers = 1` dans Gunicorn ?
@@ -260,7 +263,7 @@ L'application maintient trois singletons en mémoire :
 
 Avec plusieurs workers (processus séparés), chaque worker aurait **sa propre copie** de ces singletons → deux lecteurs RFID actifs, deux instances VLC, état incohérent entre les requêtes.
 
-La concurrence HTTP est assurée par **4 threads** dans le worker unique.
+La concurrence HTTP est assurée par **4 threads** dans le worker unique (`worker_class = "gthread"`).
 
 ---
 
@@ -311,7 +314,7 @@ sudo journalctl -u baby-jukebox -n 100
 # Logs depuis le dernier démarrage du service
 sudo journalctl -u baby-jukebox -b
 
-# Logs avec horodatage sur une période donnée
+# Logs sur une période donnée
 sudo journalctl -u baby-jukebox --since "2024-01-15 10:00" --until "2024-01-15 11:00"
 
 # Logs Gunicorn (accès HTTP)
@@ -319,10 +322,6 @@ sudo tail -f /var/log/baby-jukebox/access.log
 
 # Logs Gunicorn (erreurs et warnings)
 sudo tail -f /var/log/baby-jukebox/error.log
-
-# Logs Nginx
-sudo tail -f /var/log/nginx/error.log
-sudo tail -f /var/log/nginx/access.log
 
 # Vider les logs journald du service
 sudo journalctl --vacuum-time=1d -u baby-jukebox
@@ -372,52 +371,16 @@ defaults.ctl.card 0
 
 ---
 
-### Nginx
-
-```bash
-# Tester la configuration (avant de recharger)
-sudo nginx -t
-
-# Recharger la configuration sans coupure
-sudo systemctl reload nginx
-
-# Redémarrer Nginx
-sudo systemctl restart nginx
-
-# Statut Nginx
-sudo systemctl status nginx
-
-# Voir les sites activés
-ls -la /etc/nginx/sites-enabled/
-
-# Éditer la configuration Baby Jukebox
-sudo nano /etc/nginx/sites-available/baby-jukebox
-```
-
----
-
 ### Mise à jour de l'application
 
 ```bash
-# 1. Se placer dans le répertoire du projet (dépôt git source)
+# Méthode recommandée : git pull + re-lancer le script (idempotent)
 cd ~/baby-jukebox
-
-# 2. Récupérer les modifications
 git pull origin main
-
-# 3. Relancer le script d'installation (idempotent)
 sudo ./deploy/install.sh
 
-# ── Ou mise à jour manuelle ───────────────────────────────────────────
-
-# Copier les fichiers modifiés
-sudo cp app.py models.py player.py rfid_reader.py wsgi.py /home/pi/baby-jukebox/
-sudo cp -r templates/ /home/pi/baby-jukebox/templates/
-
-# Mettre à jour les dépendances Python si besoin
-sudo -u pi /home/pi/baby-jukebox/venv/bin/pip install -r requirements.txt
-
-# Recharger le service (graceful)
+# ── Ou mise à jour rapide sans re-script ──────────────────────────────
+git pull origin main
 sudo systemctl reload baby-jukebox
 ```
 
@@ -456,6 +419,9 @@ sudo systemctl start baby-jukebox
 lsmod | grep spi
 ls /dev/spidev*                  # Doit afficher /dev/spidev0.0
 
+# Vérifier que /dev/gpiomem est accessible
+ls -la /dev/gpiomem              # Doit afficher le groupe gpio
+
 # Vérifier les groupes de l'utilisateur pi
 id pi
 # Doit inclure : audio, spi, gpio, video
@@ -464,6 +430,8 @@ id pi
 sudo systemctl stop baby-jukebox
 source /home/pi/baby-jukebox/venv/bin/activate
 python3 - <<'EOF'
+import RPi.GPIO as GPIO
+GPIO.setwarnings(False)
 from mfrc522 import SimpleMFRC522
 reader = SimpleMFRC522()
 print("Approchez un tag RFID…")
@@ -473,13 +441,11 @@ EOF
 sudo systemctl start baby-jukebox
 
 # ── Processus ─────────────────────────────────────────────────────────
-# Voir le processus Gunicorn et ses threads
+# Voir le processus Gunicorn
 ps aux | grep gunicorn
-pstree -p $(cat /run/baby-jukebox/gunicorn.pid)
 
-# Voir les connexions réseau actives
-ss -tlnp | grep 5000          # Gunicorn
-ss -tlnp | grep 80            # Nginx
+# Vérifier que Gunicorn écoute sur le port 5000
+ss -tlnp | grep 5000
 
 # ── Ressources Pi ─────────────────────────────────────────────────────
 # Utilisation CPU/RAM en temps réel
@@ -503,9 +469,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5000
 curl http://localhost:5000/api/status
 
 # ── Redémarrage complet en cas de problème sévère ─────────────────────
-sudo systemctl stop baby-jukebox nginx
-sleep 2
-sudo systemctl start nginx baby-jukebox
+sudo systemctl restart baby-jukebox
 sudo journalctl -u baby-jukebox -n 30
 ```
 
@@ -539,25 +503,21 @@ sudo systemctl daemon-reload && sudo systemctl restart baby-jukebox
 
 | Fichier | Rôle | Modifier quand |
 |---|---|---|
-| `/etc/systemd/system/baby-jukebox.service` | Service systemd | Changer user, port, env vars |
-| `/home/pi/baby-jukebox/deploy/gunicorn.conf.py` | Gunicorn | Changer threads, timeouts, logs |
-| `/etc/nginx/sites-available/baby-jukebox` | Nginx | Changer port, nom de domaine, SSL |
+| `/etc/systemd/system/baby-jukebox.service` | Service systemd | Changer user, env vars, groupes |
+| `/home/pi/baby-jukebox/deploy/gunicorn.conf.py` | Gunicorn | Changer port, threads, timeouts, logs |
 
 ### Changer le port d'écoute
 
-Par défaut : port **80** (via Nginx) → Gunicorn sur **5000** (local).
+Par défaut : port **5000** sur toutes les interfaces.
 
-Pour changer le port public :
-```bash
-sudo nano /etc/nginx/sites-available/baby-jukebox
-# Modifier : listen 80; → listen 8080;
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-Pour exposer Gunicorn directement sans Nginx (déconseillé) :
 ```python
 # deploy/gunicorn.conf.py
-bind = "0.0.0.0:5000"
+bind = "0.0.0.0:8080"   # Changer 5000 par le port souhaité
+```
+
+Puis appliquer sur le Pi :
+```bash
+sudo systemctl restart baby-jukebox
 ```
 
 ---
@@ -580,10 +540,10 @@ bind = "0.0.0.0:5000"
 ```
 RC522 (SPI)
     │
-    ↓ polling toutes les 300ms
-[Thread RFID daemon]  ←── tourne en arrière-plan, ne bloque pas Flask
+    ↓ polling toutes les 300ms (debounce 2s)
+[Thread RFID daemon]  ←── daemon=True, ne bloque pas Flask
     │
-    ↓ tag détecté (debounce 2s)
+    ↓ tag détecté
 [on_tag_detected(rfid_id)]
     │
     ├── Tag trouvé en DB ?
@@ -597,18 +557,17 @@ RC522 (SPI)
 ### Flux de données — Requête HTTP
 
 ```
-Navigateur
+Navigateur (téléphone / PC)
     │
-  [Nginx :80]
-    │  ↳ /uploads/* → servi directement par Nginx
+    │ http://<IP>:5000
     │
-  [Gunicorn :5000]
-    │  1 worker process / 4 threads
+[Gunicorn 0.0.0.0:5000]
+    │  1 worker process / 4 threads (gthread)
     │
   [Flask]
-    │  ├── Accède à player (singleton partagé avec thread RFID)
-    │  ├── Accède à _last_unassigned_tag (partagé)
-    │  └── Accède à SQLite via SQLAlchemy
+    │  ├── player              (singleton partagé avec le thread RFID)
+    │  ├── _last_unassigned_tag (partagé)
+    │  └── SQLite via SQLAlchemy
 ```
 
 ### Modèle de données
@@ -618,8 +577,8 @@ Audio         Playlist        Tag
 ─────         ────────        ───
 id (PK)       id (PK)         id (PK)
 name          name            rfid_id (unique)
-file_path     audios []  ─M2M─ audio_id (FK, nullable)
-                               playlist_id (FK, nullable)
+file_path     audios []  ─M2M─ audio_id    (FK nullable)
+                               playlist_id (FK nullable)
 ```
 
 ---
@@ -636,9 +595,11 @@ sudo journalctl -u baby-jukebox -n 50
 |---|---|---|
 | `ModuleNotFoundError: vlc` | VLC non installé | `sudo apt-get install vlc libvlc-dev` |
 | `ModuleNotFoundError: mfrc522` | Lib RFID manquante | `pip install mfrc522 spidev RPi.GPIO` |
-| `Permission denied: /dev/spidev0.0` | SPI désactivé ou mauvais groupe | Activer SPI + `sudo usermod -aG spi pi` |
+| `TypeError: unsupported operand ... \|` | Python < 3.9 | Mettre à jour Python ou Raspberry Pi OS |
+| `No access to /dev/mem` | Mauvais groupe ou `/dev/gpiomem` inaccessible | `sudo usermod -aG gpio pi` + redémarrer le service |
+| `Permission denied: /dev/spidev0.0` | SPI désactivé ou mauvais groupe | Activer SPI via raspi-config + `sudo usermod -aG spi pi` |
 | `Address already in use :5000` | Gunicorn déjà lancé | `sudo fuser -k 5000/tcp` |
-| `error: [Errno 98]` | Port 80 déjà utilisé | `sudo systemctl stop nginx ; sudo nginx -t` |
+| `Worker boot error (exit code 3)` | Erreur Python au démarrage | Lancer `venv/bin/gunicorn --log-file=- wsgi:application` pour voir le traceback |
 
 ### Pas de son via la prise jack
 
@@ -652,7 +613,7 @@ amixer set Master 90%
 # 3. Tester avec un fichier WAV
 aplay /usr/share/sounds/alsa/Front_Center.wav
 
-# 4. Vérifier que le user 'pi' est dans le groupe 'audio'
+# 4. Vérifier que pi est dans le groupe audio
 groups pi | grep audio
 # Si absent :
 sudo usermod -aG audio pi
@@ -669,24 +630,28 @@ ls /dev/spidev*        # Doit afficher /dev/spidev0.0
 sudo raspi-config      # Interface Options → SPI → Enable
 sudo reboot
 
-# 3. Vérifier le câblage (VCC = 3.3V !)
+# 3. Vérifier les permissions /dev/gpiomem
+ls -la /dev/gpiomem    # Doit montrer le groupe gpio
+groups pi | grep gpio
+
 # 4. Tester la lib mfrc522 manuellement (voir section Debug)
 ```
 
 ### La page web ne répond pas
 
 ```bash
-# 1. Vérifier Nginx
-sudo systemctl status nginx
-curl -I http://localhost:80
-
-# 2. Vérifier Gunicorn
-curl http://localhost:5000
+# 1. Vérifier que Gunicorn tourne
 sudo systemctl status baby-jukebox
 
-# 3. Pare-feu ?
+# 2. Vérifier qu'il écoute bien sur le port 5000
+ss -tlnp | grep 5000
+
+# 3. Tester en local sur le Pi
+curl -s -o /dev/null -w "%{http_code}" http://localhost:5000
+
+# 4. Pare-feu ?
 sudo ufw status
-sudo ufw allow 80/tcp   # Si UFW est actif
+sudo ufw allow 5000/tcp   # Si UFW est actif
 ```
 
 ### Le service redémarre en boucle (StartLimitBurst)
@@ -712,5 +677,5 @@ ls -lhS /home/pi/baby-jukebox/uploads/
 # Supprimer via l'interface web : page Upload → corbeille
 # Ou directement :
 rm /home/pi/baby-jukebox/uploads/fichier_inutile.mp3
-# Puis supprimer l'entrée en base via sqlite3 ou l'interface web
+# Puis supprimer l'entrée en base via l'interface web ou sqlite3
 ```
