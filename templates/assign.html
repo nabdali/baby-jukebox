@@ -41,26 +41,24 @@
       <input type="hidden" name="rfid_id" id="rfid-id-input" value="{{ last_tag or '' }}" />
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <!-- Cible : Audio -->
+        <!-- Cible : Audio — pas de name= pour ne pas soumettre directement -->
         <div>
           <label class="block text-sm text-gray-400 mb-1">Associer à un audio</label>
-          <div class="flex gap-2">
-            <select name="target_id" id="select-audio"
-                    class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white
-                           focus:outline-none focus:border-brand transition text-sm"
-                    onchange="setTargetType('audio')">
-              <option value="">— Choisir —</option>
-              {% for audio in audios %}
-              <option value="{{ audio.id }}">{{ audio.name }}</option>
-              {% endfor %}
-            </select>
-          </div>
+          <select id="select-audio"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white
+                         focus:outline-none focus:border-brand transition text-sm"
+                  onchange="setTargetType('audio')">
+            <option value="">— Choisir —</option>
+            {% for audio in audios %}
+            <option value="{{ audio.id }}">{{ audio.name }}</option>
+            {% endfor %}
+          </select>
         </div>
 
-        <!-- Cible : Playlist -->
+        <!-- Cible : Playlist — pas de name= pour ne pas soumettre directement -->
         <div>
           <label class="block text-sm text-gray-400 mb-1">Ou à une playlist</label>
-          <select name="target_id" id="select-playlist"
+          <select id="select-playlist"
                   class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-white
                          focus:outline-none focus:border-brand transition text-sm"
                   onchange="setTargetType('playlist')">
@@ -72,8 +70,13 @@
         </div>
       </div>
 
+      <!-- Seuls ces deux champs cachés sont soumis au serveur -->
       <input type="hidden" name="target_type" id="target-type-input" value="" />
-      <input type="hidden" name="target_id" id="target-id-input" value="" />
+      <input type="hidden" name="target_id"   id="target-id-input"   value="" />
+
+      <p id="select-error" class="hidden text-sm text-red-400">
+        Veuillez sélectionner un audio ou une playlist.
+      </p>
 
       <button type="submit"
               class="px-6 py-2 bg-brand hover:bg-brand-dark rounded-xl text-white font-medium transition">
@@ -138,18 +141,33 @@
   const selectPlaylist = document.getElementById('select-playlist');
   const scanIndicator = document.getElementById('scan-indicator');
 
-  // Gère la sélection exclusive audio/playlist
+  const selectError = document.getElementById('select-error');
+
+  // Gère la sélection exclusive audio/playlist et alimente les hidden inputs
   function setTargetType(type) {
-    if (type === 'audio') {
+    if (type === 'audio' && selectAudio.value) {
       targetTypeInput.value = 'audio';
       targetIdInput.value = selectAudio.value;
       selectPlaylist.value = '';
-    } else {
+    } else if (type === 'playlist' && selectPlaylist.value) {
       targetTypeInput.value = 'playlist';
       targetIdInput.value = selectPlaylist.value;
       selectAudio.value = '';
+    } else {
+      // L'utilisateur a re-sélectionné "— Choisir —"
+      targetTypeInput.value = '';
+      targetIdInput.value = '';
     }
+    selectError.classList.add('hidden');
   }
+
+  // Validation avant envoi
+  document.getElementById('assign-form').addEventListener('submit', function (e) {
+    if (!targetTypeInput.value || !targetIdInput.value) {
+      e.preventDefault();
+      selectError.classList.remove('hidden');
+    }
+  });
 
   // Polling pour détecter un nouveau tag
   let currentTag = {{ ('"' ~ last_tag ~ '"') if last_tag else 'null' }};
