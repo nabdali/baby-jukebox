@@ -668,6 +668,35 @@ sudo systemctl start baby-jukebox
 
 ### Téléchargement YouTube en erreur
 
+#### Erreur 403 Forbidden — configurer les cookies
+
+YouTube bloque régulièrement les téléchargements depuis les Raspberry Pi sans cookies d'authentification. La solution est d'exporter vos cookies depuis un navigateur et de les uploader dans l'interface.
+
+**Procédure (depuis votre PC) :**
+
+1. Installer l'extension Chrome [**Get cookies.txt LOCALLY**](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
+
+2. Aller sur [youtube.com](https://youtube.com) dans Chrome (connecté à un compte Google ou non)
+
+3. Cliquer sur l'icône de l'extension → **Export** → enregistrer le fichier `cookies.txt`
+
+4. Dans Baby Jukebox, aller sur la page **Import** (`/upload`)
+
+5. Dans la section **YouTube** → **Cookies YouTube** → cliquer sur **Choisir cookies.txt…** → sélectionner le fichier exporté → **Enregistrer**
+
+6. Le badge en haut de la section passe au vert : **🔑 Cookies actifs**
+
+Les cookies restent valides plusieurs semaines. Quand le badge passe en jaune (**⚠ Cookies anciens**) ou si les erreurs 403 réapparaissent, répéter la procédure depuis l'étape 2.
+
+> **Alternative (ligne de commande) :** copier le fichier directement sur le Pi via `scp` :
+> ```bash
+> scp cookies.txt pi@<IP_DU_PI>:/home/pi/baby-jukebox/youtube_cookies.txt
+> ```
+
+---
+
+#### Autres erreurs YouTube
+
 ```bash
 # Vérifier que yt-dlp est installé dans le venv
 /home/pi/baby-jukebox/venv/bin/pip show yt-dlp
@@ -692,9 +721,11 @@ sudo systemctl restart baby-jukebox
 
 | Symptôme | Cause probable | Solution |
 |---|---|---|
+| `HTTP Error 403: Forbidden` | YouTube bloque sans cookies | Suivre la procédure cookies ci-dessus |
 | `yt-dlp non installé` dans l'interface | yt-dlp absent du venv | `pip install yt-dlp` dans le venv |
 | `ERROR: Postprocessing: ffprobe and ffmpeg not found` | ffmpeg manquant | `sudo apt install ffmpeg` |
-| `Sign in to confirm you're not a bot` | YouTube bloque la requête | Mettre à jour yt-dlp (`pip install -U yt-dlp`) |
+| `Requested format is not available` | Format audio indisponible | Mettre à jour yt-dlp (`pip install -U yt-dlp`) |
+| `Sign in to confirm you're not a bot` | YouTube bloque la requête | Configurer les cookies + mettre à jour yt-dlp |
 | Téléchargement en `…` bloqué indéfiniment | Erreur silencieuse dans le thread | Voir `journalctl -u baby-jukebox -n 50` |
 
 ---

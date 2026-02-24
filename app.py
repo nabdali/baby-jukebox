@@ -123,15 +123,15 @@ def allowed_file(filename: str) -> bool:
 def _yt_base_opts() -> dict:
     """Options yt-dlp communes : clients et cookies si disponibles.
 
-    Ordre des clients : tv_embedded est le moins restreint par YouTube,
-    ios en fallback, web en dernier recours.
-    Si youtube_cookies.txt est présent, il est utilisé automatiquement
-    (contourne les 403 de manière fiable).
+    On n'utilise QUE des clients mobiles (android, ios, tv_embedded).
+    Depuis 2024, le client 'web' exige un PO token (Proof of Origin) pour
+    télécharger les streams — sans lui c'est systématiquement 403, même
+    avec des cookies valides. Les clients mobiles n'ont pas cette contrainte.
     """
     opts: dict = {
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios", "web"]}},
+        "extractor_args": {"youtube": {"player_client": ["android", "ios", "tv_embedded"]}},
     }
     if YT_COOKIES_FILE.exists():
         opts["cookiefile"] = str(YT_COOKIES_FILE)
@@ -158,7 +158,8 @@ def _download_youtube(job_id: str, url: str) -> None:
 
         ydl_opts = _yt_base_opts() | {
             # m4a (tv_embedded/iOS) en priorité, puis n'importe quel audio, puis flux complet
-            "format": "bestaudio[ext=m4a]/bestaudio/best",
+            # Pas de fallback sur 'best' (video+audio) qui peut pointer vers un stream web
+            "format": "bestaudio[ext=m4a]/bestaudio",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
