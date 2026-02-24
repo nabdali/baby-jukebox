@@ -90,9 +90,11 @@ NoNewPrivileges=true
 ProtectSystem=strict
 # Exceptions en écriture : données et logs
 ReadWritePaths=/home/pi/baby-jukebox /var/log/baby-jukebox /run/baby-jukebox /dev/shm
-# Accès au son et au SPI
+# Accès au son, SPI et GPIO
 DeviceAllow=/dev/snd rw
 DeviceAllow=/dev/spidev0.0 rw
+DeviceAllow=/dev/gpiomem rw
+DeviceAllow=/dev/gpiochip0 rw
 
 [Install]
 WantedBy=multi-user.target

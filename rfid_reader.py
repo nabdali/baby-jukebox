@@ -48,33 +48,44 @@ class RFIDReader:
     def _run(self):
         try:
             from mfrc522 import SimpleMFRC522  # type: ignore
-
-            reader = SimpleMFRC522()
-            logger.info("RC522 initialisé (mode réel)")
-
-            while self._running:
-                try:
-                    rfid_id, _ = reader.read_no_block()
-                    if rfid_id is not None:
-                        tag_str = str(rfid_id).strip()
-                        now = time.monotonic()
-                        # Debounce : ignore le même tag pendant _DEBOUNCE_SECONDS
-                        if tag_str != self._last_id or (now - self._last_seen) > _DEBOUNCE_SECONDS:
-                            self._last_id = tag_str
-                            self._last_seen = now
-                            logger.info(f"Tag détecté : {tag_str}")
-                            self._callback(tag_str)
-                except Exception as e:
-                    logger.error(f"Erreur lecture RFID : {e}")
-                    time.sleep(1.0)
-
-                time.sleep(_POLL_INTERVAL)
-
         except ImportError:
             logger.warning(
-                "mfrc522 non disponible — le thread RFID tourne en mode mock (aucun tag ne sera détecté). "
-                "Normal en environnement de développement hors Raspberry Pi."
+                "mfrc522 non disponible — thread RFID en mode mock. "
+                "Normal en dehors d'un Raspberry Pi."
             )
-            # Boucle inactive — le thread reste vivant mais ne fait rien
             while self._running:
                 time.sleep(5.0)
+            return
+
+        # Boucle de tentatives d'initialisation : réessaie si /dev/gpiomem
+        # n'est pas encore accessible (ex: service démarré avant udev).
+        reader = None
+        while self._running and reader is None:
+            try:
+                reader = SimpleMFRC522()
+                logger.info("RC522 initialisé (mode réel)")
+            except RuntimeError as e:
+                logger.error(
+                    f"Impossible d'initialiser GPIO/SPI : {e} — "
+                    "Vérifiez que l'utilisateur est dans le groupe 'gpio' "
+                    "et que /dev/gpiomem est accessible. Nouvel essai dans 10s…"
+                )
+                time.sleep(10.0)
+
+        while self._running:
+            try:
+                rfid_id, _ = reader.read_no_block()
+                if rfid_id is not None:
+                    tag_str = str(rfid_id).strip()
+                    now = time.monotonic()
+                    # Debounce : ignore le même tag pendant _DEBOUNCE_SECONDS
+                    if tag_str != self._last_id or (now - self._last_seen) > _DEBOUNCE_SECONDS:
+                        self._last_id = tag_str
+                        self._last_seen = now
+                        logger.info(f"Tag détecté : {tag_str}")
+                        self._callback(tag_str)
+            except Exception as e:
+                logger.error(f"Erreur lecture RFID : {e}")
+                time.sleep(1.0)
+
+            time.sleep(_POLL_INTERVAL)
