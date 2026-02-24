@@ -98,27 +98,33 @@ done
 # ---------------------------------------------------------------------------
 section "Déploiement des fichiers"
 
-# Crée le répertoire de l'application
+# Crée le répertoire de l'application et ses sous-dossiers
 install -d -m 755 -o "$APP_USER" -g "$APP_USER" "$APP_DIR"
 install -d -m 755 -o "$APP_USER" -g "$APP_USER" "${APP_DIR}/uploads"
 install -d -m 755 -o "$APP_USER" -g "$APP_USER" "${APP_DIR}/templates"
 install -d -m 755 -o "$APP_USER" -g "$APP_USER" "${APP_DIR}/deploy"
 
-# Copie les fichiers Python et de config depuis le répertoire courant
-# (supposant que le script est lancé depuis la racine du projet)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-for f in app.py models.py player.py rfid_reader.py wsgi.py requirements.txt; do
-    cp -v "${PROJECT_ROOT}/${f}" "${APP_DIR}/${f}"
-    chown "$APP_USER:$APP_USER" "${APP_DIR}/${f}"
-done
+if [[ "$PROJECT_ROOT" == "$APP_DIR" ]]; then
+    # Cas courant : le dépôt git est déjà cloné dans APP_DIR
+    # Rien à copier, on règle juste les permissions
+    info "Le projet est déjà dans $APP_DIR — copie ignorée, correction des permissions…"
+    chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+else
+    # Cas où le script est lancé depuis un répertoire source différent
+    info "Copie depuis $PROJECT_ROOT vers $APP_DIR…"
+    for f in app.py models.py player.py rfid_reader.py wsgi.py requirements.txt; do
+        cp -v "${PROJECT_ROOT}/${f}" "${APP_DIR}/${f}"
+        chown "$APP_USER:$APP_USER" "${APP_DIR}/${f}"
+    done
+    cp -rv "${PROJECT_ROOT}/templates/." "${APP_DIR}/templates/"
+    cp -rv "${PROJECT_ROOT}/deploy/."    "${APP_DIR}/deploy/"
+    chown -R "$APP_USER:$APP_USER" "${APP_DIR}/templates" "${APP_DIR}/deploy"
+fi
 
-cp -rv "${PROJECT_ROOT}/templates/." "${APP_DIR}/templates/"
-cp -rv "${PROJECT_ROOT}/deploy/."    "${APP_DIR}/deploy/"
-chown -R "$APP_USER:$APP_USER" "${APP_DIR}/templates" "${APP_DIR}/deploy"
-
-success "Fichiers copiés dans $APP_DIR"
+success "Fichiers prêts dans $APP_DIR"
 
 # ---------------------------------------------------------------------------
 # 5. Environnement virtuel Python
