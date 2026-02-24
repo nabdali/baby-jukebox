@@ -144,6 +144,8 @@ def _download_youtube(job_id: str, url: str) -> None:
             "nooverwrites": True,
             "quiet": True,
             "no_warnings": True,
+            # Client iOS : contourne les 403 YouTube sur Raspberry Pi / ARM
+            "extractor_args": {"youtube": {"player_client": ["ios"]}},
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -297,6 +299,8 @@ def youtube_search():
             "quiet": True,
             "no_warnings": True,
             "extract_flat": True,
+            # Client iOS : contourne les 403 YouTube sur Raspberry Pi / ARM
+            "extractor_args": {"youtube": {"player_client": ["ios"]}},
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch8:{q}", download=False)
