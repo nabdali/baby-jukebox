@@ -39,6 +39,11 @@ BASE_DIR = Path(__file__).parent
 UPLOAD_FOLDER = BASE_DIR / "uploads"
 ALLOWED_EXTENSIONS = {"mp3", "ogg", "wav", "flac", "m4a"}
 
+# Fichier de cookies Netscape optionnel pour contourner les 403 YouTube.
+# Exporter depuis Chrome/Firefox avec l'extension "Get cookies.txt LOCALLY"
+# puis copier sur le Pi : scp cookies.txt pi@<IP>:/home/pi/baby-jukebox/youtube_cookies.txt
+YT_COOKIES_FILE = BASE_DIR / "youtube_cookies.txt"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
@@ -115,6 +120,25 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _yt_base_opts() -> dict:
+    """Options yt-dlp communes : clients et cookies si disponibles.
+
+    Ordre des clients : tv_embedded est le moins restreint par YouTube,
+    ios en fallback, web en dernier recours.
+    Si youtube_cookies.txt est présent, il est utilisé automatiquement
+    (contourne les 403 de manière fiable).
+    """
+    opts: dict = {
+        "quiet": True,
+        "no_warnings": True,
+        "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios", "web"]}},
+    }
+    if YT_COOKIES_FILE.exists():
+        opts["cookiefile"] = str(YT_COOKIES_FILE)
+        logger.info("YouTube : cookies chargés depuis youtube_cookies.txt")
+    return opts
+
+
 def _fmt_duration(seconds) -> str:
     """Formate une durée en secondes → MM:SS ou H:MM:SS."""
     if not seconds:
@@ -132,8 +156,8 @@ def _download_youtube(job_id: str, url: str) -> None:
     try:
         import yt_dlp  # type: ignore
 
-        ydl_opts = {
-            # m4a (iOS) en priorité, puis n'importe quel audio, puis flux complet
+        ydl_opts = _yt_base_opts() | {
+            # m4a (tv_embedded/iOS) en priorité, puis n'importe quel audio, puis flux complet
             "format": "bestaudio[ext=m4a]/bestaudio/best",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
@@ -143,11 +167,6 @@ def _download_youtube(job_id: str, url: str) -> None:
             # Nomme le fichier par l'ID vidéo → nom prévisible, pas de conflit
             "outtmpl": str(UPLOAD_FOLDER / "%(id)s.%(ext)s"),
             "nooverwrites": True,
-            "quiet": True,
-            "no_warnings": True,
-            # ios : contourne les 403 sur Raspberry Pi / ARM
-            # web : fallback si ios ne fournit pas le format demandé
-            "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -297,13 +316,7 @@ def youtube_search():
     try:
         import yt_dlp  # type: ignore
 
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": True,
-            # Client iOS : contourne les 403 YouTube sur Raspberry Pi / ARM
-            "extractor_args": {"youtube": {"player_client": ["ios"]}},
-        }
+        ydl_opts = _yt_base_opts() | {"extract_flat": True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch8:{q}", download=False)
 
@@ -351,6 +364,35 @@ def youtube_job_status(job_id: str):
     if not job:
         return jsonify(error="Job inconnu"), 404
     return jsonify(**job)
+
+
+@app.route("/api/youtube/cookies-status")
+def youtube_cookies_status():
+    """Indique si un fichier de cookies YouTube est présent et son ancienneté."""
+    if not YT_COOKIES_FILE.exists():
+        return jsonify(present=False)
+    import time as _time
+    age_days = (_time.time() - YT_COOKIES_FILE.stat().st_mtime) / 86400
+    return jsonify(present=True, age_days=round(age_days))
+
+
+@app.route("/youtube/cookies", methods=["POST"])
+def upload_youtube_cookies():
+    """Reçoit un fichier cookies.txt Netscape et le sauvegarde pour yt-dlp."""
+    f = request.files.get("cookies_file")
+    if not f or f.filename == "":
+        flash("Aucun fichier sélectionné.", "error")
+        return redirect(url_for("upload"))
+
+    content = f.read().decode("utf-8", errors="ignore")
+    if "youtube.com" not in content:
+        flash("Ce fichier ne semble pas contenir de cookies YouTube.", "error")
+        return redirect(url_for("upload"))
+
+    YT_COOKIES_FILE.write_text(content)
+    logger.info("Cookies YouTube mis à jour via l'interface web")
+    flash("Cookies YouTube enregistrés — les téléchargements utiliseront ces cookies.", "success")
+    return redirect(url_for("upload"))
 
 
 # ---------------------------------------------------------------------------
