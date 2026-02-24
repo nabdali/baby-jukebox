@@ -22,8 +22,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Délai de rebond : évite de déclencher plusieurs fois le même tag
-_DEBOUNCE_SECONDS = 2.0
 # Intervalle de polling entre deux tentatives de détection
 _POLL_INTERVAL = 0.1
 
@@ -38,8 +36,8 @@ class RFIDReader:
         self._callback = on_tag_detected
         self._thread = threading.Thread(target=self._run, daemon=True, name="rfid-reader")
         self._running = False
-        self._last_id: str | None = None
-        self._last_seen: float = 0.0
+        self._last_id: str | None = None   # UID du tag actuellement posé
+        self._tag_present: bool = False    # tag détecté au cycle précédent
 
     def start(self):
         self._running = True
@@ -97,13 +95,20 @@ class RFIDReader:
                             n = n * 256 + byte
                         tag_str = str(n)
 
-                        now = time.monotonic()
-                        # Debounce : ignore le même tag pendant _DEBOUNCE_SECONDS
-                        if tag_str != self._last_id or (now - self._last_seen) > _DEBOUNCE_SECONDS:
+                        # Déclenche le callback uniquement sur le front montant :
+                        # - nouveau tag posé (UID différent du précédent), OU
+                        # - tag reposé après avoir été retiré (_tag_present == False)
+                        if not self._tag_present or tag_str != self._last_id:
                             self._last_id = tag_str
-                            self._last_seen = now
                             logger.info(f"Tag détecté : {tag_str}")
                             self._callback(tag_str)
+
+                        self._tag_present = True
+                else:
+                    # Aucun tag dans le champ — réinitialise l'état
+                    if self._tag_present:
+                        logger.debug(f"Tag retiré : {self._last_id}")
+                    self._tag_present = False
 
             except Exception as e:
                 logger.error(f"Erreur lecture RFID : {e}")
