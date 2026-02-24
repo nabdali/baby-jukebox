@@ -74,14 +74,14 @@ def on_tag_detected(rfid_id: str):
         tag = Tag.query.filter_by(rfid_id=rfid_id).first()
         if tag:
             if tag.audio_id and tag.audio:
-                path = tag.audio.file_path
+                path = audio_abs_path(tag.audio.file_path)
                 if not os.path.isfile(path):
                     logger.error(f"Tag {rfid_id} → fichier introuvable : {path}")
                     return
                 logger.info(f"Tag {rfid_id} → lecture audio '{tag.audio.name}' ({path})")
                 player.play_file(path)
             elif tag.playlist_id and tag.playlist:
-                files = [a.file_path for a in tag.playlist.audios]
+                files = [audio_abs_path(a.file_path) for a in tag.playlist.audios]
                 missing = [f for f in files if not os.path.isfile(f)]
                 if missing:
                     logger.warning(f"Playlist : {len(missing)} fichier(s) introuvable(s) : {missing}")
@@ -104,6 +104,22 @@ def on_tag_detected(rfid_id: str):
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def audio_abs_path(file_path: str) -> str:
+    """
+    Retourne le chemin absolu d'un fichier audio.
+
+    La base de données stocke désormais uniquement le nom du fichier (ex: 'titre.mp3').
+    Cette fonction préfixe UPLOAD_FOLDER pour obtenir le chemin complet.
+
+    Rétrocompatibilité : si file_path est déjà un chemin absolu valide
+    (anciens enregistrements), il est retourné tel quel.
+    """
+    p = Path(file_path)
+    if p.is_absolute():
+        return str(p)
+    return str(UPLOAD_FOLDER / p)
 
 
 # ---------------------------------------------------------------------------
@@ -150,10 +166,11 @@ def player_prev():
 @app.route("/play/audio/<int:audio_id>", methods=["POST"])
 def play_audio(audio_id: int):
     audio = db.get_or_404(Audio, audio_id)
-    if not os.path.isfile(audio.file_path):
-        flash(f"Fichier introuvable : {audio.file_path}", "error")
+    path = audio_abs_path(audio.file_path)
+    if not os.path.isfile(path):
+        flash(f"Fichier introuvable : {path}", "error")
         return redirect(url_for("upload"))
-    player.play_file(audio.file_path)
+    player.play_file(path)
     flash(f"Lecture : {audio.name}", "success")
     return redirect(url_for("index"))
 
@@ -161,7 +178,7 @@ def play_audio(audio_id: int):
 @app.route("/play/playlist/<int:playlist_id>", methods=["POST"])
 def play_playlist(playlist_id: int):
     playlist = db.get_or_404(Playlist, playlist_id)
-    files = [a.file_path for a in playlist.audios if os.path.isfile(a.file_path)]
+    files = [audio_abs_path(a.file_path) for a in playlist.audios if os.path.isfile(audio_abs_path(a.file_path))]
     if not files:
         flash(f"Aucune piste disponible dans '{playlist.name}'.", "error")
         return redirect(url_for("playlists"))
@@ -223,9 +240,13 @@ def upload():
 
                 file.save(str(dest))
 
-                # Vérifie qu'il n'y a pas déjà un Audio avec ce chemin
-                if not Audio.query.filter_by(file_path=str(dest)).first():
-                    audio = Audio(name=dest.stem.replace("_", " ").replace("-", " "), file_path=str(dest))
+                # Stocke uniquement le nom de fichier (portable entre machines)
+                # audio_abs_path() reconstituera le chemin complet à la lecture
+                if not Audio.query.filter_by(file_path=dest.name).first():
+                    audio = Audio(
+                        name=dest.stem.replace("_", " ").replace("-", " "),
+                        file_path=dest.name,
+                    )
                     db.session.add(audio)
                     saved += 1
 
@@ -242,7 +263,7 @@ def delete_audio(audio_id: int):
     audio = db.get_or_404(Audio, audio_id)
     # Supprime le fichier physique
     try:
-        Path(audio.file_path).unlink(missing_ok=True)
+        Path(audio_abs_path(audio.file_path)).unlink(missing_ok=True)
     except Exception as e:
         logger.warning(f"Impossible de supprimer le fichier {audio.file_path} : {e}")
     db.session.delete(audio)
