@@ -90,8 +90,9 @@ NoNewPrivileges=true
 ProtectSystem=strict
 # Exceptions en écriture : données et logs
 ReadWritePaths=/home/pi/baby-jukebox /var/log/baby-jukebox /run/baby-jukebox /dev/shm
-# Accès au son, SPI et GPIO
-DeviceAllow=/dev/snd rw
+# Accès au son (tous les devices ALSA sous /dev/snd/*)
+DeviceAllow=char-alsa rw
+# Accès SPI et GPIO pour le RC522
 DeviceAllow=/dev/spidev0.0 rw
 DeviceAllow=/dev/gpiomem rw
 DeviceAllow=/dev/gpiochip0 rw
