@@ -123,33 +123,27 @@ def allowed_file(filename: str) -> bool:
 def _yt_base_opts() -> dict:
     """Options yt-dlp communes : clients et cookies si disponibles.
 
-    Stratégie client selon la présence de cookies :
-    - Avec cookies : 'web' en premier (les cookies bypasse le PO token),
-      puis clients mobiles en fallback.
-    - Sans cookies  : 'mweb' (web mobile, chemin différent de web desktop),
-      puis 'tv_embedded' et 'ios' en fallback.
+    Clients retenus :
+    - ios         : pas de PO token, pas de SABR — le plus fiable en 2025/2026
+    - tv_embedded : fallback, fonctionne sur les vidéos embarquables
+    NE PAS utiliser :
+    - web/mweb    : SABR forcing depuis 2025 (yt-dlp #12482), URLs directes supprimées
+    - android     : blacklisté par YouTube depuis fin 2024
 
-    IMPORTANT : mettre à jour yt-dlp régulièrement car YouTube bloque les
-    versions hardcodées des clients. En cas d'erreur "no longer supported" :
+    IMPORTANT : mettre à jour yt-dlp régulièrement.
+    En cas d'erreur "no longer supported" ou 403 :
       pip install -U yt-dlp && systemctl restart baby-jukebox
     """
     cookies_present = YT_COOKIES_FILE.exists()
 
-    if cookies_present:
-        # Avec cookies valides, le client web fonctionne (bypass PO token)
-        clients = ["web", "mweb", "tv_embedded"]
-        logger.info("YouTube : cookies chargés depuis youtube_cookies.txt")
-    else:
-        # Sans cookies : clients mobiles uniquement (pas de PO token requis)
-        clients = ["mweb", "tv_embedded", "ios"]
-
     opts: dict = {
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {"youtube": {"player_client": clients}},
+        "extractor_args": {"youtube": {"player_client": ["ios", "tv_embedded"]}},
     }
     if cookies_present:
         opts["cookiefile"] = str(YT_COOKIES_FILE)
+        logger.info("YouTube : cookies chargés depuis youtube_cookies.txt")
     return opts
 
 
