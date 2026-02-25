@@ -172,8 +172,8 @@ def _download_youtube(job_id: str, url: str) -> None:
 
         ydl_opts = _yt_base_opts() | {
             # m4a (tv_embedded/iOS) en priorité, puis n'importe quel audio, puis flux complet
-            # Pas de fallback sur 'best' (video+audio) qui peut pointer vers un stream web
-            "format": "bestaudio[ext=m4a]/bestaudio",
+            # Aucune restriction de format : yt-dlp prend ce qui est disponible
+            # ffmpeg se charge de l'extraction audio quelle que soit la source
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
